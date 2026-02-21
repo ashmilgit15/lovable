@@ -1,0 +1,30 @@
+services:
+  - type: web
+    name: lovable-backend
+    runtime: python
+    plan: free
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        value: sqlite:///./data/lovable.db
+      - key: OLLAMA_BASE_URL
+        value: http://127.0.0.1:11434
+      - key: OLLAMA_DEFAULT_MODEL
+        value: llama3.1
+      - key: CORS_ORIGINS
+        sync: false
+      - key: CLERK_SECRET_KEY
+        sync: false
+      - key: CLERK_PUBLISHABLE_KEY
+        sync: false
+      - key: BYOK_ENCRYPTION_KEY
+        sync: false
+      - key: SERP_API_KEY
+        sync: false
+      - key: ENABLE_UNTRUSTED_CODE_EXECUTION
+        value: "false"
+      - key: ALLOW_UNVERIFIED_LOCAL_AUTH
+        value: "false"
