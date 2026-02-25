@@ -1,0 +1,9 @@
+{
+  "name": "lovable-root",
+  "private": true,
+  "scripts": {
+    "build": "npm --prefix frontend install && npm --prefix frontend run build && node scripts/vercel-sync-dist.mjs",
+    "lint": "npm --prefix frontend run lint",
+    "dev": "npm --prefix frontend run dev"
+  }
+}
