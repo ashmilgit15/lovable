@@ -43,6 +43,20 @@ function sanitizeAssistantMessage(content: string): string {
   return cleaned.trim();
 }
 
+function buildEditedFilesSummary(
+  changedFiles: Array<{ filename: string }>
+): string {
+  if (changedFiles.length === 0) return "";
+  const maxVisible = 8;
+  const lines = changedFiles
+    .slice(0, maxVisible)
+    .map((file) => `- ${file.filename}: edited`);
+  if (changedFiles.length > maxVisible) {
+    lines.push(`- +${changedFiles.length - maxVisible} more`);
+  }
+  return `Edited files:\n${lines.join("\n")}`;
+}
+
 export default function Builder() {
   const { projectId } = useParams<{ projectId: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -337,6 +351,23 @@ export default function Builder() {
       };
       s.addMessage(assistantMessage);
       collab.syncChatMessage(assistantMessage);
+
+      const editedFilesSummary = buildEditedFilesSummary(changedFiles);
+      if (editedFilesSummary) {
+        const fileSummaryMessage: {
+          id: string;
+          role: "system";
+          content: string;
+          created_at: string;
+        } = {
+          id: crypto.randomUUID(),
+          role: "system",
+          content: editedFilesSummary,
+          created_at: new Date().toISOString(),
+        };
+        s.addMessage(fileSummaryMessage);
+        collab.syncChatMessage(fileSummaryMessage);
+      }
 
       s.clearStreamContent();
       return;
