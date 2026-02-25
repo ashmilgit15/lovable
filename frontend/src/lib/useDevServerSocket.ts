@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { authenticatedWsUrl } from "./auth";
+import { authFetch, authenticatedWsUrl } from "./auth";
 import { apiUrl } from "./backend";
 
 interface DevServerEvent {
@@ -10,6 +10,12 @@ interface DevServerEvent {
     exit_code?: number;
 }
 
+interface DevServerStatusResponse {
+    running: boolean;
+    port: string | number | null;
+    disabled?: boolean;
+}
+
 export function useDevServerSocket(projectId: string | undefined) {
     const [logs, setLogs] = useState<string[]>([]);
     const [port, setPort] = useState<string | null>(null);
@@ -17,16 +23,33 @@ export function useDevServerSocket(projectId: string | undefined) {
     const [isStarting, setIsStarting] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [isConnected, setIsConnected] = useState(false);
+    const [isDisabled, setIsDisabled] = useState(false);
 
     const wsRef = useRef<WebSocket | null>(null);
     const reconnectTimerRef = useRef<number | undefined>(undefined);
     const retriesRef = useRef(0);
     const closedIntentionallyRef = useRef(false);
     const pendingActionRef = useRef<'start' | 'stop' | 'restart' | null>(null);
+    const disabledRef = useRef(false);
+
+    const markDevServerDisabled = useCallback(() => {
+        disabledRef.current = true;
+        setIsDisabled(true);
+        setIsConnected(false);
+        setIsRunning(false);
+        setIsStarting(false);
+        setPort(null);
+        setError('Dev server is disabled on this deployment.');
+        pendingActionRef.current = null;
+        if (reconnectTimerRef.current) {
+            window.clearTimeout(reconnectTimerRef.current);
+            reconnectTimerRef.current = undefined;
+        }
+    }, []);
 
     const connect = useCallback(async () => {
         try {
-            if (!projectId) return;
+            if (!projectId || disabledRef.current) return;
 
             if (wsRef.current && (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING)) {
                 return;
@@ -46,6 +69,20 @@ export function useDevServerSocket(projectId: string | undefined) {
                     }, 5000);
                 }
                 return;
+            }
+
+            const statusRes = await authFetch(
+                apiUrl(`/api/projects/${projectId}/devserver/status`),
+                { cache: "no-store" }
+            );
+            if (statusRes.ok) {
+                const status = await statusRes.json() as DevServerStatusResponse;
+                if (status.disabled) {
+                    markDevServerDisabled();
+                    return;
+                }
+                setIsRunning(Boolean(status.running));
+                setPort(status.running && status.port !== null ? String(status.port) : null);
             }
 
             const path = `/ws/projects/${projectId}/devserver`;
@@ -96,9 +133,13 @@ export function useDevServerSocket(projectId: string | undefined) {
                 }
             };
 
-            ws.onclose = () => {
+            ws.onclose = (event) => {
                 setIsConnected(false);
                 wsRef.current = null;
+                if (event.code === 4403) {
+                    markDevServerDisabled();
+                    return;
+                }
                 if (!closedIntentionallyRef.current) {
                     const maxRetries = 5;
                     if (retriesRef.current < maxRetries) {
@@ -111,15 +152,21 @@ export function useDevServerSocket(projectId: string | undefined) {
             };
 
             ws.onerror = () => {
-                setError('WebSocket connection error');
+                if (!disabledRef.current) {
+                    setError('WebSocket connection error');
+                }
             };
         } catch (error) {
             console.error('[DevServer] Init failed:', error);
-            setError('Failed to connect dev server socket');
+            if (!disabledRef.current) {
+                setError('Failed to connect dev server socket');
+            }
         }
-    }, [projectId]);
+    }, [markDevServerDisabled, projectId]);
 
     useEffect(() => {
+        disabledRef.current = false;
+        setIsDisabled(false);
         closedIntentionallyRef.current = false;
         void connect();
         return () => {
@@ -139,6 +186,10 @@ export function useDevServerSocket(projectId: string | undefined) {
     }, [connect]);
 
     const startServer = () => {
+        if (disabledRef.current) {
+            markDevServerDisabled();
+            return;
+        }
         if (wsRef.current?.readyState === WebSocket.OPEN) {
             setLogs([]);
             setIsStarting(true);
@@ -152,6 +203,10 @@ export function useDevServerSocket(projectId: string | undefined) {
     };
 
     const stopServer = () => {
+        if (disabledRef.current) {
+            markDevServerDisabled();
+            return;
+        }
         if (wsRef.current?.readyState === WebSocket.OPEN) {
             wsRef.current.send(JSON.stringify({ action: 'stop' }));
             return;
@@ -161,6 +216,10 @@ export function useDevServerSocket(projectId: string | undefined) {
     };
 
     const restartServer = () => {
+        if (disabledRef.current) {
+            markDevServerDisabled();
+            return;
+        }
         if (wsRef.current?.readyState === WebSocket.OPEN) {
             setLogs([]);
             setIsStarting(true);
@@ -180,6 +239,7 @@ export function useDevServerSocket(projectId: string | undefined) {
         isStarting,
         error,
         isConnected,
+        isDisabled,
         startServer,
         stopServer,
         restartServer,

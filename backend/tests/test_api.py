@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 from sqlmodel import SQLModel, create_engine
 from sqlalchemy.pool import StaticPool
 import database
+from routes import devserver as devserver_routes
 
 
 def _make_client() -> TestClient:
@@ -142,3 +143,24 @@ class TestOperationalEndpoints:
         data = res.json()
         assert "requests" in data
         assert "rate_limit" in data
+
+
+class TestDevServerStatus:
+    def test_status_reports_disabled_flag(self, monkeypatch):
+        client = _make_client()
+        created = client.post("/api/projects", json={"name": "Status Disabled"})
+        project_id = created.json()["id"]
+
+        monkeypatch.setattr(
+            devserver_routes,
+            "is_untrusted_code_execution_enabled",
+            lambda: False,
+        )
+
+        response = client.get(f"/api/projects/{project_id}/devserver/status")
+        assert response.status_code == 200
+        assert response.json() == {
+            "running": False,
+            "port": None,
+            "disabled": True,
+        }

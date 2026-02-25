@@ -56,6 +56,7 @@ export default function PreviewPanel({ onSendVisualPrompt }: PreviewPanelProps) 
     isRunning,
     isStarting,
     error,
+    isDisabled,
     startServer,
     stopServer,
     restartServer,
@@ -178,6 +179,13 @@ export default function PreviewPanel({ onSendVisualPrompt }: PreviewPanelProps) 
                   Booting
                 </span>
               </div>
+            ) : isDisabled ? (
+              <div className="flex items-center gap-1.5 rounded-full border border-orange-500/20 bg-orange-500/10 px-2 py-0.5">
+                <div className="h-1.5 w-1.5 rounded-full bg-orange-500" />
+                <span className="text-[10px] font-medium uppercase tracking-wider text-orange-500">
+                  Disabled
+                </span>
+              </div>
             ) : error ? (
               <div className="flex items-center gap-1.5 rounded-full border border-red-500/20 bg-red-500/10 px-2 py-0.5">
                 <div className="h-1.5 w-1.5 rounded-full bg-red-500" />
@@ -287,10 +295,10 @@ export default function PreviewPanel({ onSendVisualPrompt }: PreviewPanelProps) 
               size="sm"
               className="h-7 gap-1.5 px-2 text-[10px] text-emerald-500 hover:bg-emerald-500/10 hover:text-emerald-400"
               onClick={startServer}
-              disabled={isStarting}
+              disabled={isStarting || isDisabled}
             >
               <Play className="h-3 w-3 fill-current" />
-              {isStarting ? "Starting..." : "Start Dev Server"}
+              {isDisabled ? "Dev Server Disabled" : isStarting ? "Starting..." : "Start Dev Server"}
             </Button>
           )}
         </div>
@@ -312,7 +320,17 @@ export default function PreviewPanel({ onSendVisualPrompt }: PreviewPanelProps) 
           />
         ) : (
           <div className="flex flex-1 flex-col items-center justify-center bg-[#0a0a0a] p-6 text-center">
-            {error ? (
+            {isDisabled ? (
+              <div className="max-w-md animate-in fade-in zoom-in-95 duration-300">
+                <div className="mb-4 inline-flex h-12 w-12 items-center justify-center rounded-full bg-orange-500/10">
+                  <AlertCircle className="h-6 w-6 text-orange-400" />
+                </div>
+                <h3 className="mb-2 font-medium text-white">Dev Server Disabled</h3>
+                <p className="text-sm leading-relaxed text-gray-500">
+                  Live preview is disabled on this backend deployment. Enable untrusted code execution on the backend or run locally to use the dev server preview.
+                </p>
+              </div>
+            ) : error ? (
               <div className="max-w-md animate-in fade-in zoom-in-95 duration-300">
                 <div className="mb-4 inline-flex h-12 w-12 items-center justify-center rounded-full bg-red-500/10">
                   <AlertCircle className="h-6 w-6 text-red-500" />

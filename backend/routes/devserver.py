@@ -1,14 +1,38 @@
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
 from sqlmodel import Session
 
-from auth import authorize_websocket_or_close, get_claim_user_id
 import os
+
+from auth import authorize_websocket_or_close, get_claim_user_id, get_request_user_id
+from database import engine, get_session
 from devserver import dev_server_manager
-from database import engine
 from project_access import require_project_for_user
 from runtime_security import is_untrusted_code_execution_enabled
 
 router = APIRouter()
+
+
+@router.get("/api/projects/{project_id}/devserver/status")
+async def get_devserver_status(
+    project_id: str,
+    request: Request,
+    session: Session = Depends(get_session),
+):
+    if not is_untrusted_code_execution_enabled():
+        return {
+            "running": False,
+            "port": None,
+            "disabled": True,
+        }
+
+    require_project_for_user(session, project_id, get_request_user_id(request))
+    running = dev_server_manager.is_running(project_id)
+    return {
+        "running": running,
+        "port": dev_server_manager.ports.get(project_id) if running else None,
+        "disabled": False,
+    }
+
 
 @router.websocket("/ws/projects/{project_id}/devserver")
 async def devserver_websocket(websocket: WebSocket, project_id: str):
