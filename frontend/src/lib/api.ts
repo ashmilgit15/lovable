@@ -197,14 +197,6 @@ export async function deleteProject(id: string): Promise<void> {
   await fetchJson(`${API_BASE}/projects/${id}`, { method: "DELETE" });
 }
 
-export async function getOllamaStatus(): Promise<{ status: string; url: string }> {
-  return fetchJson<{ status: string; url: string }>(`${API_BASE}/ollama/status`);
-}
-
-export async function getOllamaModels(): Promise<{ models: string[] }> {
-  return fetchJson<{ models: string[] }>(`${API_BASE}/ollama/models`);
-}
-
 export async function getProjectMemory(projectId: string): Promise<MemoryData> {
   return fetchJson<MemoryData>(`${API_BASE}/memory/${projectId}`);
 }

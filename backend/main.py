@@ -18,7 +18,6 @@ from cors_config import load_cors_settings
 
 from database import init_db
 from routes.projects import router as projects_router
-from routes.ollama import router as ollama_router
 from routes.chat import router as chat_router
 from routes.terminal import router as terminal_router
 from routes.devserver import router as devserver_router
@@ -40,7 +39,7 @@ async def lifespan(app: FastAPI):
     init_db()
     yield
 
-app = FastAPI(title="Lovable Local API", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="One API", version="0.1.0", lifespan=lifespan)
 STARTED_AT = time.time()
 rate_limit_config = load_rate_limit_config()
 rate_limiter = InMemoryRateLimiter(
@@ -71,7 +70,7 @@ app.add_middleware(
 @app.get("/")
 @app.head("/")
 async def root():
-    return {"status": "ok", "message": "Lovable Local API is running"}
+    return {"status": "ok", "message": "One API is running"}
 
 
 # Health endpoints
@@ -100,7 +99,6 @@ async def metrics():
 
 # Include Routers
 app.include_router(projects_router)
-app.include_router(ollama_router)
 app.include_router(chat_router)
 app.include_router(terminal_router)
 app.include_router(devserver_router)

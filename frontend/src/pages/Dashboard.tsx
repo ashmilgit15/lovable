@@ -11,7 +11,6 @@ import {
   listTemplates,
 } from "@/lib/api";
 import { BUILDER_TEMPLATES } from "@/data/templates";
-import OllamaStatus from "@/components/OllamaStatus";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -148,12 +147,11 @@ export default function Dashboard() {
             <Bolt className="h-4 w-4 fill-current text-white" />
           </div>
           <span className="text-lg font-semibold tracking-tight text-slate-100">
-            lovable <span className="text-cyan-300">local</span>
+            one
           </span>
         </div>
 
         <div className="flex items-center gap-2 sm:gap-4">
-          <OllamaStatus className="hidden md:flex" />
           <Link to="/settings">
             <Button
               variant="ghost"

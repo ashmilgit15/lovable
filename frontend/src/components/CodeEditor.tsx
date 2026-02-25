@@ -15,7 +15,7 @@ export default function CodeEditor() {
 
   useEffect(() => {
     if (!monaco) return;
-    monaco.editor.defineTheme("lovable-dark", {
+    monaco.editor.defineTheme("one-dark", {
       base: "vs-dark",
       inherit: true,
       rules: [],
@@ -25,7 +25,7 @@ export default function CodeEditor() {
         "editorLineNumber.foreground": "#48607f",
       },
     });
-    monaco.editor.setTheme("lovable-dark");
+    monaco.editor.setTheme("one-dark");
   }, [monaco]);
 
   const handleCopy = () => {
@@ -84,7 +84,7 @@ export default function CodeEditor() {
           language={language}
           value={file.content}
           path={file.filename}
-          theme="lovable-dark"
+          theme="one-dark"
           onChange={(value) => {
             if (value !== undefined && activeFile) {
               updateFile(activeFile, value);

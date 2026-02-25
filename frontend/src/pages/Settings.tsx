@@ -3,35 +3,18 @@ import { Link, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { UserButton } from "@clerk/clerk-react";
 import {
-  getOllamaModels,
-  getOllamaStatus,
   getProjectMemory,
-  getRoutingConfig,
   listProjects,
   listProviders,
 } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft, Settings2, Zap } from "lucide-react";
-import OllamaStatus from "@/components/OllamaStatus";
-import OllamaConnectionCard from "@/components/settings/OllamaConnectionCard";
 import ProviderCard from "@/components/settings/ProviderCard";
-import ModelManagementCard from "@/components/settings/ModelManagementCard";
-import RoutingCard from "@/components/settings/RoutingCard";
 import ProjectSafetyCard from "@/components/settings/ProjectSafetyCard";
 import { CLERK_ENABLED } from "@/lib/clerkConfig";
 
 export default function Settings() {
   const [searchParams, setSearchParams] = useSearchParams();
-
-  const { data: status, refetch: refetchStatus, isRefetching: statusRefetching } = useQuery({
-    queryKey: ["ollama-status"],
-    queryFn: getOllamaStatus,
-  });
-
-  const { data: modelsData, refetch: refetchModels, isRefetching: modelsRefetching } = useQuery({
-    queryKey: ["ollama-models"],
-    queryFn: getOllamaModels,
-  });
 
   const { data: projects } = useQuery({ queryKey: ["projects"], queryFn: listProjects });
 
@@ -41,11 +24,6 @@ export default function Settings() {
     queryKey: ["project-memory", selectedProjectId],
     queryFn: () => getProjectMemory(selectedProjectId),
     enabled: Boolean(selectedProjectId),
-  });
-
-  const { data: routingConfig, refetch: refetchRouting } = useQuery({
-    queryKey: ["routing-config"],
-    queryFn: getRoutingConfig,
   });
 
   const { data: providersData, refetch: refetchProviders } = useQuery({
@@ -66,9 +44,6 @@ export default function Settings() {
     [projects, selectedProjectId]
   );
 
-  const isConnected = status?.status === "connected";
-  const models = modelsData?.models || [];
-
   const handleSelectProject = (id: string) => {
     const next = new URLSearchParams(searchParams);
     next.set("projectId", id);
@@ -83,12 +58,11 @@ export default function Settings() {
             <Zap className="h-4 w-4 fill-current text-white" />
           </div>
           <span className="text-lg font-semibold tracking-tight text-slate-100">
-            lovable <span className="text-cyan-300">local</span>
+            one
           </span>
         </div>
 
         <div className="flex items-center gap-2 sm:gap-4">
-          <OllamaStatus className="hidden md:flex" />
           <Link to="/dashboard">
             <Button
               variant="ghost"
@@ -112,33 +86,17 @@ export default function Settings() {
               <div>
                 <h1 className="text-3xl font-semibold tracking-tight text-slate-100">Workspace Settings</h1>
                 <p className="mt-2 max-w-2xl text-sm leading-relaxed text-slate-300">
-                  Configure providers, models, routing policy, and per-project safety defaults before deployment.
+                  Configure providers and per-project safety defaults before deployment.
                 </p>
               </div>
             </div>
           </section>
 
           <div className="grid gap-6">
-            <OllamaConnectionCard
-              status={status}
-              isRefetching={statusRefetching}
-              onRefresh={() => refetchStatus()}
-            />
             <ProviderCard
               providers={providersData?.providers || []}
               presets={providersData?.presets}
               onRefetch={() => refetchProviders()}
-            />
-            <ModelManagementCard
-              models={models}
-              isConnected={isConnected}
-              isRefetching={modelsRefetching}
-              onRefresh={() => refetchModels()}
-            />
-            <RoutingCard
-              routingConfig={routingConfig}
-              models={models}
-              onRefetch={() => refetchRouting()}
             />
             <ProjectSafetyCard
               projects={projects || []}

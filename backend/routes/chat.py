@@ -36,7 +36,6 @@ from ai import (
     SYSTEM_PROMPT,
     parse_ai_response,
     sanitize_assistant_message_text,
-    stream_from_ollama,
     stream_from_openai_compatible,
     AIProviderError,
 )
@@ -45,11 +44,7 @@ from memory import (
     get_memory_context,
 )
 from router import (
-    classify_intent_ai,
     classify_intent_simple,
-    get_model_for_intent,
-    load_routing_overrides,
-    get_available_models,
 )
 from autofix import run_project_autofix
 from preview_bridge import ensure_preview_bridge
@@ -88,46 +83,6 @@ ESSENTIAL_CONTEXT_FILES = {
     "src/App.tsx",
     "src/index.css",
 }
-
-
-def is_text_model_name(model_name: str) -> bool:
-    lowered = model_name.lower()
-    blocked_tokens = ("vl", "vision", "embed", "embedding")
-    return not any(token in lowered for token in blocked_tokens)
-
-
-def build_model_candidates(
-    primary_model: str,
-    available_models: list[str],
-) -> list[str]:
-    candidates: list[str] = []
-
-    def add_candidate(model_name: str):
-        normalized = (model_name or "").strip()
-        if not normalized or normalized in candidates:
-            return
-        candidates.append(normalized)
-
-    add_candidate(primary_model)
-
-    env_default = (os.getenv("OLLAMA_DEFAULT_MODEL") or "").strip()
-    if env_default:
-        if env_default in available_models:
-            add_candidate(env_default)
-        else:
-            for available in available_models:
-                if env_default.split(":")[0] in available:
-                    add_candidate(available)
-                    break
-
-    for model_name in available_models:
-        if is_text_model_name(model_name):
-            add_candidate(model_name)
-
-    for model_name in available_models:
-        add_candidate(model_name)
-
-    return candidates[:8]
 
 
 async def iter_tokens_with_timeouts(
@@ -369,31 +324,38 @@ async def chat_websocket(websocket: WebSocket, project_id: str):
                         {"type": "error", "content": "Selected provider was not found."},
                     )
                     continue
-
-            available_models = await get_available_models()
-            routing_overrides = load_routing_overrides(user_id=claim_user_id)
-
-            if provider_config or requested_model:
-                intent_result = classify_intent_simple(user_message)
             else:
-                intent_result = await classify_intent_ai(user_message, available_models)
+                with Session(engine) as session:
+                    provider_config = session.exec(
+                        select(ProviderConfig).where(
+                            and_(
+                                owned_provider_filter(claim_user_id),
+                                ProviderConfig.is_active,
+                            )
+                        )
+                    ).first()
 
-            resolved_model = requested_model or get_model_for_intent(
-                intent_result.intent,
-                available_models=available_models,
-                user_overrides=routing_overrides,
-            )
+            if not provider_config:
+                await safe_send(
+                    websocket,
+                    {
+                        "type": "error",
+                        "content": (
+                            "No active provider configured. Connect and activate a provider in Settings."
+                        ),
+                    },
+                )
+                GENERATION_ACTIVE[project_id] = False
+                GENERATION_CANCEL_FLAGS[project_id] = False
+                continue
 
-            if provider_config:
-                resolved_model = provider_config.model
-                model_used = f"{provider_config.provider}:{resolved_model}"
-                provider_payload = {
-                    "provider_id": provider_config.id,
-                    "provider": provider_config.provider,
-                }
-            else:
-                model_used = resolved_model
-                provider_payload = {}
+            intent_result = classify_intent_simple(user_message)
+            resolved_model = requested_model or provider_config.model
+            model_used = f"{provider_config.provider}:{resolved_model}"
+            provider_payload = {
+                "provider_id": provider_config.id,
+                "provider": provider_config.provider,
+            }
 
             await safe_send(
                 websocket,
@@ -702,110 +664,44 @@ async def chat_websocket(websocket: WebSocket, project_id: str):
             generation_model_used = model_used
 
             try:
-                if provider_config:
-                    extra_headers = None
-                    if provider_config.provider == "openrouter":
-                        extra_headers = {
-                            "HTTP-Referer": "http://localhost:5173",
-                            "X-Title": "Forge Local",
-                        }
+                extra_headers = None
+                if provider_config.provider == "openrouter":
+                    extra_headers = {
+                        "HTTP-Referer": "http://localhost:5173",
+                        "X-Title": "One",
+                    }
 
-                    try:
-                        provider_api_key = resolve_provider_api_key(provider_config)
-                    except ProviderSecretError as secret_error:
-                        raise AIProviderError(str(secret_error))
+                try:
+                    provider_api_key = resolve_provider_api_key(provider_config)
+                except ProviderSecretError as secret_error:
+                    raise AIProviderError(str(secret_error))
 
-                    token_stream = stream_from_openai_compatible(
-                        ollama_messages,
-                        model=resolved_model,
-                        base_url=provider_config.base_url or "",
-                        api_key=provider_api_key,
-                        extra_headers=extra_headers,
-                    )
+                token_stream = stream_from_openai_compatible(
+                    ollama_messages,
+                    model=resolved_model,
+                    base_url=provider_config.base_url or "",
+                    api_key=provider_api_key,
+                    extra_headers=extra_headers,
+                )
 
-                    async for token in iter_tokens_with_timeouts(token_stream):
-                        if GENERATION_CANCEL_FLAGS.get(project_id):
-                            canceled = True
-                            break
+                async for token in iter_tokens_with_timeouts(token_stream):
+                    if GENERATION_CANCEL_FLAGS.get(project_id):
+                        canceled = True
+                        break
 
-                        if not first_token_sent:
-                            first_token_sent = True
-                            await safe_send(
-                                websocket,
-                                {
-                                    "type": "progress",
-                                    "phase": "generation",
-                                    "status": "in_progress",
-                                    "message": "Streaming response...",
-                                },
-                            )
-                        full_response += token
-                        await safe_send(websocket, {"type": "token", "content": token})
-                else:
-                    model_candidates = build_model_candidates(resolved_model, available_models)
-                    provider_errors: list[str] = []
-
-                    for candidate in model_candidates:
-                        full_response = ""
-                        first_token_sent = False
-                        generation_model_used = candidate
+                    if not first_token_sent:
+                        first_token_sent = True
                         await safe_send(
                             websocket,
                             {
                                 "type": "progress",
                                 "phase": "generation",
                                 "status": "in_progress",
-                                "message": f"Generating with {candidate}...",
+                                "message": "Streaming response...",
                             },
                         )
-
-                        try:
-                            token_stream = stream_from_ollama(ollama_messages, model=candidate)
-                            async for token in iter_tokens_with_timeouts(token_stream):
-                                if GENERATION_CANCEL_FLAGS.get(project_id):
-                                    canceled = True
-                                    break
-
-                                if not first_token_sent:
-                                    first_token_sent = True
-                                    await safe_send(
-                                        websocket,
-                                        {
-                                            "type": "progress",
-                                            "phase": "generation",
-                                            "status": "in_progress",
-                                            "message": "Streaming response...",
-                                        },
-                                    )
-                                full_response += token
-                                await safe_send(websocket, {"type": "token", "content": token})
-
-                            if canceled:
-                                break
-
-                            if first_token_sent and full_response.strip():
-                                break
-
-                            provider_errors.append(f"{candidate}: empty response")
-                        except Exception as candidate_error:
-                            provider_errors.append(
-                                f"{candidate}: {format_exception_detail(candidate_error)}"
-                            )
-                            await safe_send(
-                                websocket,
-                                {
-                                    "type": "progress",
-                                    "phase": "generation",
-                                    "status": "failed",
-                                    "message": f"Model {candidate} failed, trying fallback...",
-                                },
-                            )
-
-                    if not canceled and (not first_token_sent or not full_response.strip()):
-                        raise AIProviderError(
-                            "All candidate local models failed. "
-                            + " | ".join(provider_errors[:4])
-                        )
+                    full_response += token
+                    await safe_send(websocket, {"type": "token", "content": token})
 
                 if canceled:
                     await safe_send(
@@ -1053,7 +949,7 @@ async def chat_websocket(websocket: WebSocket, project_id: str):
                         "content": (
                             "Model error: "
                             + error_detail
-                            + " Try selecting another model in the picker, or pull a lightweight coding model in Settings."
+                            + " Check your active provider and model settings, then try again."
                         ),
                     },
                 )

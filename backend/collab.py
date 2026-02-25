@@ -86,17 +86,17 @@ class CollaborationManager:
 
             self.service_info = ServiceInfo(
                 "_http._tcp.local.",
-                "forge._http._tcp.local.",
+                "one._http._tcp.local.",
                 addresses=[socket.inet_aton(local_ip)],
                 port=port,
-                properties={"name": "Forge Local", "version": "1.0.0", "path": "/"},
-                server="forge.local.",
+                properties={"name": "One", "version": "1.0.0", "path": "/"},
+                server="one.local.",
             )
 
             await asyncio.get_event_loop().run_in_executor(
                 None, self.zeroconf.register_service, self.service_info
             )
-            print(f"mDNS service registered at forge.local:{port}")
+            print(f"mDNS service registered at one.local:{port}")
         except Exception as e:
             print(f"Failed to start mDNS: {e}")
 

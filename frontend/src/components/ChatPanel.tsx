@@ -280,7 +280,7 @@ export default function ChatPanel({
               Describe what to build
             </h3>
             <p className="mx-auto max-w-[220px] text-xs leading-relaxed">
-              Forge routes the request to the best local model and returns complete file updates.
+              One sends your request to the active provider and returns complete file updates.
             </p>
           </div>
         ) : null}

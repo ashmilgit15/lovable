@@ -80,7 +80,7 @@ export default function ProviderCard({ providers, presets, onRefetch }: Provider
                     Connect Provider
                 </CardTitle>
                 <CardDescription className="text-gray-500">
-                    Use external model APIs (OpenAI-compatible) alongside local Ollama models.
+                    Use external model APIs (OpenAI-compatible) for all AI generation.
                 </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">

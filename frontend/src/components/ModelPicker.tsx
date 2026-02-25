@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { getOllamaModels, listProviders } from "@/lib/api";
+import { listProviders } from "@/lib/api";
 import { useBuilderStore } from "@/store/builderStore";
 import { ChevronDown, Box } from "lucide-react";
 import {
@@ -11,29 +11,22 @@ import {
 import { Button } from "@/components/ui/button";
 
 export default function ModelPicker() {
-  const { data } = useQuery({
-    queryKey: ["ollama-models"],
-    queryFn: getOllamaModels,
-    refetchInterval: 30000,
-  });
   const { data: providersData } = useQuery({
     queryKey: ["providers"],
     queryFn: listProviders,
     refetchInterval: 30000,
   });
 
-  const selectedModel = useBuilderStore((s) => s.selectedModel);
   const setSelectedModel = useBuilderStore((s) => s.setSelectedModel);
   const selectedProviderId = useBuilderStore((s) => s.selectedProviderId);
   const setSelectedProviderId = useBuilderStore((s) => s.setSelectedProviderId);
 
-  const models = data?.models || [];
   const providers = providersData?.providers || [];
-  const hasAnyOptions = models.length > 0 || providers.length > 0;
+  const hasAnyOptions = providers.length > 0;
   const selectedProvider = providers.find((provider) => provider.id === selectedProviderId);
   const currentModel = selectedProvider
     ? `${selectedProvider.name} · ${selectedProvider.model}`
-    : selectedModel || "Auto (Local Router)";
+    : "No provider selected";
 
   return (
     <DropdownMenu>
@@ -54,7 +47,7 @@ export default function ModelPicker() {
       >
         {!hasAnyOptions ? (
           <div className="px-2 py-2 text-xs text-gray-500 text-center">
-            No models/providers found
+            No providers found
           </div>
         ) : (
           <>
@@ -65,20 +58,8 @@ export default function ModelPicker() {
               }}
               className="cursor-pointer rounded-sm text-xs focus:bg-cyan-500/10 focus:text-cyan-300"
             >
-              Auto (Local Router)
+              Clear Selection
             </DropdownMenuItem>
-            {models.map((m) => (
-              <DropdownMenuItem
-                key={m}
-                onClick={() => {
-                  setSelectedModel(m);
-                  setSelectedProviderId(null);
-                }}
-                className="cursor-pointer rounded-sm text-xs focus:bg-cyan-500/10 focus:text-cyan-300"
-              >
-                Local: {m}
-              </DropdownMenuItem>
-            ))}
             {providers.length > 0 ? (
               <>
                 <div className="my-1 border-t border-[#262626]" />

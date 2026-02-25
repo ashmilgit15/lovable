@@ -1,21 +1,14 @@
 import { useBuilderStore } from "@/store/builderStore";
 import { Loader2, CheckCircle2, Database } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
-import { getOllamaStatus, listProviders } from "@/lib/api";
+import { listProviders } from "@/lib/api";
 
 export default function StatusBar() {
   const isStreaming = useBuilderStore((s) => s.isStreaming);
-  const selectedModel = useBuilderStore((s) => s.selectedModel);
   const selectedProviderId = useBuilderStore((s) => s.selectedProviderId);
   const files = useBuilderStore((s) => s.files);
   const pendingCount = useBuilderStore((s) => Object.keys(s.pendingChanges).length);
   const autoFix = useBuilderStore((s) => s.autoFix);
-
-  const { data: ollamaStatus } = useQuery({
-    queryKey: ["ollama-status"],
-    queryFn: getOllamaStatus,
-    refetchInterval: 20000,
-  });
   const { data: providersData } = useQuery({
     queryKey: ["providers"],
     queryFn: listProviders,
@@ -23,7 +16,6 @@ export default function StatusBar() {
   });
 
   const fileCount = Object.keys(files).length;
-  const isConnected = ollamaStatus?.status === "connected";
   const selectedProvider = providersData?.providers.find(
     (provider) => provider.id === selectedProviderId
   );
@@ -32,11 +24,11 @@ export default function StatusBar() {
     <div className="relative z-20 flex h-7 select-none items-center justify-between border-t border-white/10 bg-slate-950/70 px-3 text-[10px] text-slate-500 backdrop-blur-xl">
       <div className="flex items-center gap-4">
         <div className="flex items-center gap-1.5 transition-colors hover:text-slate-300">
-          <div className={`w-1.5 h-1.5 rounded-full ${isConnected ? "bg-emerald-500" : "bg-red-500"}`} />
+          <div className={`w-1.5 h-1.5 rounded-full ${selectedProvider ? "bg-emerald-500" : "bg-red-500"}`} />
           <span>
-            {selectedProviderId && selectedProvider
+            {selectedProvider
               ? `${selectedProvider.name} · ${selectedProvider.model}`
-              : selectedModel || "Auto-routed model"}
+              : "No provider selected"}
           </span>
         </div>
 

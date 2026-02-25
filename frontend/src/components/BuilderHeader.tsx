@@ -10,7 +10,6 @@ import {
   Pencil,
 } from "lucide-react";
 
-import OllamaStatus from "@/components/OllamaStatus";
 import ModelPicker from "@/components/ModelPicker";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -121,7 +120,7 @@ export default function BuilderHeader({
             <Zap className="h-3 w-3 text-white fill-current" />
           </div>
           <span className="font-bold text-sm tracking-tight text-slate-100">
-            lovable <span className="text-cyan-300">local</span>
+            one
           </span>
         </div>
       </div>
@@ -173,7 +172,6 @@ export default function BuilderHeader({
         <div className="mx-1 h-4 w-[1px] bg-white/15" />
 
         <ModelPicker />
-        <OllamaStatus />
 
         <div className="mx-1 h-4 w-[1px] bg-white/15" />
 

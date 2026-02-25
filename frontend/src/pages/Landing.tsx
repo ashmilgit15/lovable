@@ -1,7 +1,6 @@
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { SignedIn, SignedOut, SignInButton } from "@clerk/clerk-react";
-import OllamaStatus from "@/components/OllamaStatus";
 import { CLERK_ENABLED } from "@/lib/clerkConfig";
 import {
   ArrowRight,
@@ -45,9 +44,9 @@ const deployChecklist = [
 
 const quickFacts = [
   {
-    label: "Local-First AI",
+    label: "Provider Ready",
     value: "100%",
-    detail: "Your model workflows can stay on your own infrastructure with Ollama.",
+    detail: "Connect OpenAI-compatible providers and build with hosted models.",
   },
   {
     label: "Tech Stack",
@@ -70,12 +69,11 @@ export default function Landing() {
             <Zap className="h-4 w-4 fill-current text-white" />
           </div>
           <span className="text-lg font-semibold tracking-tight text-slate-100">
-            lovable <span className="text-cyan-300">local</span>
+            one
           </span>
         </div>
 
         <div className="flex items-center gap-2 sm:gap-4">
-          <OllamaStatus className="hidden sm:flex" />
           <Link to="/settings">
             <Button
               variant="ghost"
@@ -120,7 +118,7 @@ export default function Landing() {
             <div>
               <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-cyan-400/30 bg-cyan-400/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.12em] text-cyan-200">
                 <Cpu className="h-3.5 w-3.5" />
-                Local AI Application Studio
+                AI Application Studio
               </div>
 
               <h1 className="max-w-3xl text-4xl font-bold leading-tight text-slate-100 sm:text-5xl lg:text-6xl">
@@ -128,8 +126,8 @@ export default function Landing() {
               </h1>
 
               <p className="mt-5 max-w-2xl text-base leading-relaxed text-slate-300 sm:text-lg">
-                lovable local turns prompts into production-grade code, gives you a live preview and terminal, and
-                keeps your model workflows under your control.
+                one turns prompts into production-grade code, gives you a live preview and terminal, and
+                keeps your workflow deployment-ready.
               </p>
 
               <div className="mt-7 flex flex-col gap-3 sm:flex-row sm:items-center">
@@ -232,7 +230,7 @@ export default function Landing() {
       </main>
 
       <footer className="relative z-10 border-t border-white/10 bg-slate-950/60 px-6 py-5 text-center text-sm text-slate-400">
-        <p>Lovable Local | Privacy-first AI development with deployment-ready workflows</p>
+        <p>One | AI development with deployment-ready workflows</p>
       </footer>
     </div>
   );
