@@ -14,6 +14,7 @@ from rate_limit import (
     load_rate_limit_config,
 )
 from security_headers import SecurityHeadersMiddleware
+from cors_config import load_cors_settings
 
 from database import init_db
 from routes.projects import router as projects_router
@@ -46,16 +47,14 @@ rate_limiter = InMemoryRateLimiter(
     max_requests=rate_limit_config.max_requests,
     window_seconds=rate_limit_config.window_seconds,
 )
+cors_settings = load_cors_settings()
 
 # CORS configuration
-_default_origins = "http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000"
-_cors_origins = os.getenv("CORS_ORIGINS", _default_origins).split(",")
-_normalized_cors_origins = [o.strip() for o in _cors_origins if o.strip()]
-_allow_credentials = "*" not in _normalized_cors_origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=_normalized_cors_origins or ["http://localhost:5173"],
-    allow_credentials=_allow_credentials,
+    allow_origins=cors_settings.allow_origins,
+    allow_origin_regex=cors_settings.allow_origin_regex,
+    allow_credentials=cors_settings.allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )

@@ -40,7 +40,10 @@ npm run dev
 The Vite frontend is ready for Vercel deploys from `frontend/`.
 
 1. Deploy a backend separately (FastAPI + WebSockets + local process features are not suitable for Vercel serverless in this repo).
-   - On the backend, set `CORS_ORIGINS` to include your Vercel frontend URL.
+   - On the backend, set `CORS_ORIGINS` to include your Vercel frontend URL (no trailing slash), for example:
+     - `CORS_ORIGINS=https://lovable-rose.vercel.app`
+   - Optional for preview deployments:
+     - `CORS_ORIGIN_REGEX=https://.*\\.vercel\\.app`
 2. In Vercel project env vars, set:
    - `VITE_CLERK_PUBLISHABLE_KEY`
    - `VITE_BACKEND_URL` (example: `https://your-backend.example.com`)
