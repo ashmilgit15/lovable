@@ -13,7 +13,8 @@ from urllib.request import urlopen
 from urllib.request import Request as UrlRequest
 from base64 import urlsafe_b64decode
 
-from fastapi import Request, WebSocket, HTTPException, status
+from fastapi import Request, WebSocket, status
+from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 # ------------------------------------------------------------------
@@ -29,9 +30,14 @@ ALLOW_UNVERIFIED_LOCAL_AUTH = os.getenv(
     "ALLOW_UNVERIFIED_LOCAL_AUTH",
     "false",
 ).strip().lower() in {"1", "true", "yes", "on"}
+# Local/dev fallback toggle for clients that pass `user_id` directly on websocket URLs.
 
 # Endpoints that never require auth
-PUBLIC_PATHS = {"/health", "/api/health", "/docs", "/openapi.json", "/redoc"}
+PUBLIC_PATHS = {"/", "/health", "/api/health", "/docs", "/openapi.json", "/redoc"}
+_NORMALIZED_PUBLIC_PATHS = {
+    path.rstrip("/") if path != "/" else "/" for path in PUBLIC_PATHS
+}
+
 
 # ------------------------------------------------------------------
 # JWKS cache
@@ -185,9 +191,6 @@ def _decode_token_unverified(token: str) -> Optional[dict]:
 def _local_user_from_token(token: Optional[str]) -> str:
     if not token:
         return "local"
-    if not ALLOW_UNVERIFIED_LOCAL_AUTH:
-        return "local"
-
     decoded = _decode_token_unverified(token)
     if isinstance(decoded, dict):
         subject = decoded.get("sub")
@@ -195,6 +198,11 @@ def _local_user_from_token(token: Optional[str]) -> str:
             return str(subject)
 
     return "local"
+
+
+def _normalize_path(path: str) -> str:
+    normalized = (path or "").rstrip("/")
+    return normalized or "/"
 
 
 class ClerkAuthMiddleware(BaseHTTPMiddleware):
@@ -211,7 +219,8 @@ class ClerkAuthMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         # Skip public paths
-        if request.url.path in PUBLIC_PATHS:
+        request_path = _normalize_path(request.url.path)
+        if request_path in _NORMALIZED_PUBLIC_PATHS:
             return await call_next(request)
 
         # Skip WebSocket upgrades (handled separately in the WS endpoints)
@@ -220,9 +229,9 @@ class ClerkAuthMiddleware(BaseHTTPMiddleware):
 
         token = extract_token_from_request(request)
         if not token:
-            raise HTTPException(
+            return JSONResponse(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Missing authentication token",
+                content={"detail": "Missing authentication token"},
             )
 
         try:
@@ -231,9 +240,9 @@ class ClerkAuthMiddleware(BaseHTTPMiddleware):
             request.state.user_id = claims.get("sub", "")
             request.state.session_id = claims.get("sid", "")
         except Exception:
-            raise HTTPException(
+            return JSONResponse(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid authentication token",
+                content={"detail": "Invalid authentication token"},
             )
 
         return await call_next(request)

@@ -16,6 +16,7 @@ from project_access import require_project_for_user, owned_project_filter
 from preview_bridge import ensure_preview_bridge
 from autofix import run_project_autofix
 from runtime_security import is_untrusted_code_execution_enabled
+from ai import sanitize_assistant_message_text
 
 def is_safe_path(base_dir: str, filename: str) -> bool:
     """Check if the filename stays within the base_dir."""
@@ -559,10 +560,28 @@ def get_project(
         .order_by(ChatMessage.created_at)
     ).all()
 
+    serialized_messages = []
+    for message in messages:
+        message_content = message.content
+        if message.role == "assistant":
+            message_content = sanitize_assistant_message_text(message_content)
+            if not message_content:
+                message_content = "Generation complete."
+        serialized_messages.append(
+            {
+                "id": message.id,
+                "project_id": message.project_id,
+                "role": message.role,
+                "content": message_content,
+                "created_at": message.created_at,
+                "model_used": message.model_used,
+            }
+        )
+
     return {
         "project": project,
         "files": files,
-        "messages": messages,
+        "messages": serialized_messages,
     }
 
 

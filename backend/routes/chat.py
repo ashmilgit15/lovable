@@ -35,6 +35,7 @@ from provider_secrets import ProviderSecretError, resolve_provider_api_key
 from ai import (
     SYSTEM_PROMPT,
     parse_ai_response,
+    sanitize_assistant_message_text,
     stream_from_ollama,
     stream_from_openai_compatible,
     AIProviderError,
@@ -816,14 +817,14 @@ async def chat_websocket(websocket: WebSocket, project_id: str):
                     continue
 
                 parsed = parse_ai_response(full_response)
-                assistant_summary = (parsed.explanation or "").strip()
+                assistant_summary = sanitize_assistant_message_text(full_response)
                 if not assistant_summary:
                     assistant_summary = (
                         f"Updated {len(parsed.files)} files."
                         if parsed.files
                         else "Generation complete."
                     )
-                assistant_content = full_response.strip() or assistant_summary
+                assistant_content = assistant_summary
 
                 generation_id = str(uuid.uuid4())
                 files_changed: list[str] = []

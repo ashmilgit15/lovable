@@ -13,6 +13,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
 DEFAULT_EXEMPT_PATHS = (
+    "/",
     "/health",
     "/api/health",
     "/docs",

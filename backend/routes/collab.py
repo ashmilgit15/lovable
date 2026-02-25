@@ -35,6 +35,7 @@ async def collab_websocket(
     websocket: WebSocket,
     project_id: str,
     username: str = Query(default="Anonymous"),
+    user_id: str = Query(default=""),
 ):
     claims = await authorize_websocket_or_close(websocket)
     if claims is None:
@@ -50,11 +51,12 @@ async def collab_websocket(
 
     await websocket.accept()
 
-    user_id: str
+    resolved_user_id: str
     if claim_user_id != "local":
-        user_id = claim_user_id
+        resolved_user_id = claim_user_id
     else:
-        user_id = str(uuid.uuid4())
+        fallback_user_id = (user_id or "").strip()
+        resolved_user_id = fallback_user_id or str(uuid.uuid4())
 
     username = _sanitize_username(username)
     if username == "Anonymous":
@@ -65,12 +67,14 @@ async def collab_websocket(
             if isinstance(claims, dict)
             else None
         )
-        username = _sanitize_username(str(claim_name or f"User-{str(user_id)[:6]}"))
+        username = _sanitize_username(
+            str(claim_name or f"User-{str(resolved_user_id)[:6]}")
+        )
 
     try:
         room = await collab_manager.join_room(
             project_id=project_id,
-            user_id=user_id,
+            user_id=resolved_user_id,
             username=username,
             websocket=websocket,
         )
@@ -78,7 +82,7 @@ async def collab_websocket(
         await websocket.send_json(
             {
                 "type": "joined",
-                "user_id": user_id,
+                "user_id": resolved_user_id,
                 "room_info": {
                     "project_id": project_id,
                     "users": collab_manager.get_room_users(project_id),
@@ -95,7 +99,7 @@ async def collab_websocket(
             if msg_type == "cursor_move":
                 await collab_manager.sync_cursor(
                     project_id=project_id,
-                    user_id=user_id,
+                    user_id=resolved_user_id,
                     cursor=data.get("cursor", {}),
                 )
 
@@ -104,24 +108,26 @@ async def collab_websocket(
                     project_id=project_id,
                     filename=data.get("filename"),
                     content=data.get("content"),
-                    from_user=user_id,
+                    from_user=resolved_user_id,
                 )
 
             elif msg_type == "chat_message":
                 await collab_manager.sync_chat_message(
                     project_id=project_id,
                     message=data.get("message", {}),
-                    from_user=user_id,
+                    from_user=resolved_user_id,
                 )
 
             elif msg_type == "suggestion":
                 await collab_manager.add_suggestion(
-                    project_id=project_id, user_id=user_id, message=data.get("message")
+                    project_id=project_id,
+                    user_id=resolved_user_id,
+                    message=data.get("message"),
                 )
 
             elif msg_type == "approve_suggestion":
                 room_state = collab_manager.get_room_state(project_id)
-                if room_state.get("owner_id") != user_id:
+                if room_state.get("owner_id") != resolved_user_id:
                     continue
                 suggestion_id = data.get("suggestion_id")
                 suggestion = await collab_manager.approve_suggestion(
@@ -137,10 +143,10 @@ async def collab_websocket(
                 await websocket.send_json({"type": "pong"})
 
     except WebSocketDisconnect:
-        await collab_manager.leave_room(project_id, user_id)
+        await collab_manager.leave_room(project_id, resolved_user_id)
     except Exception as e:
         print(f"Collab WebSocket error: {e}")
-        await collab_manager.leave_room(project_id, user_id)
+        await collab_manager.leave_room(project_id, resolved_user_id)
 
 
 @router.post("/{project_id}/start-discovery")

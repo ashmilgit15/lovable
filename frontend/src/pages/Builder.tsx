@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -32,13 +32,33 @@ interface BuilderWsMessage {
   [key: string]: unknown;
 }
 
+function sanitizeAssistantMessage(content: string): string {
+  let cleaned = (content || "").trim();
+  if (!cleaned) return "";
+
+  cleaned = cleaned.replace(/```[\w-]*\n[\s\S]*?```/g, "");
+  cleaned = cleaned.replace(/^FILE:\s*.+$/gim, "");
+  cleaned = cleaned.replace(/^\s*EXPLANATION:\s*/i, "");
+  cleaned = cleaned.replace(/\n{3,}/g, "\n\n");
+  return cleaned.trim();
+}
+
 export default function Builder() {
   const { projectId } = useParams<{ projectId: string }>();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [workspaceView, setWorkspaceView] = useState<"preview" | "code">("preview");
   const store = useBuilderStore();
   const queryClient = useQueryClient();
-  const templatePromptSentRef = useRef(false);
+  const prefillInput = useMemo(() => {
+    if (!projectId) return null;
+    const promptFromSession = sessionStorage.getItem(
+      `forge:template-prompt:${projectId}`
+    );
+    const promptFromQuery = searchParams.get("template");
+    const text = (promptFromSession || promptFromQuery || "").trim();
+    if (!text) return null;
+    return { text, nonce: `${projectId}:${text}` };
+  }, [projectId, searchParams]);
 
   const { data } = useQuery({
     queryKey: ["project", projectId],
@@ -63,7 +83,10 @@ export default function Builder() {
       data.messages.map((message) => ({
         id: message.id,
         role: message.role as "user" | "assistant" | "system",
-        content: message.content,
+        content:
+          message.role === "assistant"
+            ? sanitizeAssistantMessage(message.content) || "Generation complete."
+            : message.content,
         created_at: message.created_at,
         model_used: message.model_used,
       }))
@@ -75,6 +98,24 @@ export default function Builder() {
       useBuilderStore.getState().reset();
     };
   }, [projectId]);
+
+  useEffect(() => {
+    if (!projectId) return;
+
+    const promptFromSession = sessionStorage.getItem(
+      `forge:template-prompt:${projectId}`
+    );
+    const promptFromQuery = searchParams.get("template");
+    if (promptFromSession) {
+      sessionStorage.removeItem(`forge:template-prompt:${projectId}`);
+    }
+
+    if (promptFromQuery) {
+      const next = new URLSearchParams(searchParams);
+      next.delete("template");
+      setSearchParams(next, { replace: true });
+    }
+  }, [projectId, searchParams, setSearchParams]);
 
   const wsUrl = projectId
     ? backendWsUrl(`/ws/projects/${projectId}/chat`)
@@ -88,9 +129,22 @@ export default function Builder() {
       if (!message?.id) return;
       const state = useBuilderStore.getState();
       if (state.messages.some((item) => item.id === message.id)) return;
-      state.addMessage(message);
+      const normalizedMessage =
+        message.role === "assistant"
+          ? {
+              ...message,
+              content:
+                sanitizeAssistantMessage(message.content) || "Generation complete.",
+            }
+          : message;
+      state.addMessage(normalizedMessage);
     },
   });
+  const hasRemoteOwner =
+    collab.connected &&
+    collab.users.some((user) => user.is_owner && user.id !== collab.userId);
+  const suggestionMode = hasRemoteOwner && !collab.isOwner;
+  const canGenerateDirectly = !suggestionMode;
 
   function onWsMessage(raw: unknown) {
     const msg = (raw || {}) as BuilderWsMessage;
@@ -121,7 +175,6 @@ export default function Builder() {
     }
 
     if (msg.type === "token") {
-      s.appendStreamContent(String(msg.content || ""));
       return;
     }
 
@@ -151,17 +204,6 @@ export default function Builder() {
       s.setIsStreaming(false);
       s.clearGenerationProgress();
       s.clearFileProgress();
-      const partial = s.streamContent.trim();
-      if (partial) {
-        const partialMessage = {
-          id: crypto.randomUUID(),
-          role: "assistant" as const,
-          content: `${partial}\n\n[Stopped by user]`,
-          created_at: new Date().toISOString(),
-        };
-        s.addMessage(partialMessage);
-        collab.syncChatMessage(partialMessage);
-      }
       s.clearStreamContent();
       s.addMessage({
         id: crypto.randomUUID(),
@@ -236,14 +278,13 @@ export default function Builder() {
       }
       s.setPendingChanges({}, null);
 
-      const generatedContent = String(msg.content || "").trim();
-      const streamedContent = s.streamContent.trim();
+      const generatedContent = sanitizeAssistantMessage(String(msg.content || ""));
+      const explanationContent = sanitizeAssistantMessage(String(msg.explanation || ""));
       const assistantContent =
         generatedContent ||
-        streamedContent ||
-        String(msg.explanation || "").trim() ||
+        explanationContent ||
         (changedFiles.length > 0
-          ? `${changedFiles.length} files updated`
+          ? `${changedFiles.length} files updated.`
           : "Generation complete.");
 
       const assistantMessage: {
@@ -294,7 +335,7 @@ export default function Builder() {
   ) {
     if (!message.trim()) return;
 
-    if (!collab.isOwner && !options?.bypassOwnerCheck) {
+    if (!options?.bypassOwnerCheck && suggestionMode) {
       collab.sendSuggestion(message);
       toast.message("Suggestion sent to owner");
       return;
@@ -321,12 +362,16 @@ export default function Builder() {
     store.clearGenerationProgress();
     store.clearFileProgress();
 
-    send({
+    const sent = send({
       message,
       model: store.selectedModel || undefined,
       provider_id: store.selectedProviderId || undefined,
       tools: store.chatTools,
     });
+    if (!sent) {
+      store.setIsStreaming(false);
+      toast.error("Connection not ready. Reconnecting...");
+    }
   }
 
   async function stopChatMessage() {
@@ -357,46 +402,11 @@ export default function Builder() {
   });
 
   useEffect(() => {
-    if (!connected || !projectId || templatePromptSentRef.current) return;
-
-    const promptFromSession = sessionStorage.getItem(`forge:template-prompt:${projectId}`);
-    const promptFromQuery = searchParams.get("template");
-    const initialPrompt = promptFromSession || promptFromQuery;
-    if (!initialPrompt) return;
-
-    templatePromptSentRef.current = true;
-    const templateMessagePayload: {
-      id: string;
-      role: "user";
-      content: string;
-      created_at: string;
-    } = {
-      id: crypto.randomUUID(),
-      role: "user",
-      content: initialPrompt,
-      created_at: new Date().toISOString(),
-    };
-    store.addMessage(templateMessagePayload);
-    collab.syncChatMessage(templateMessagePayload);
-    store.setIsStreaming(true);
-    store.clearStreamContent();
-    store.clearGenerationProgress();
-    store.clearFileProgress();
-    send({
-      message: initialPrompt,
-      model: store.selectedModel || undefined,
-      provider_id: store.selectedProviderId || undefined,
-      tools: store.chatTools,
-    });
-    sessionStorage.removeItem(`forge:template-prompt:${projectId}`);
-  }, [collab, connected, projectId, searchParams, send, store]);
-
-  useEffect(() => {
-    if (!projectId || !collab.isOwner) return;
+    if (!projectId || !canGenerateDirectly) return;
     startCollabDiscovery(projectId).catch(() => {
       // mDNS can fail on some platforms; keep collaboration usable without discovery.
     });
-  }, [projectId, collab.isOwner]);
+  }, [projectId, canGenerateDirectly]);
 
   useEffect(() => {
     const saveActiveFile = async () => {
@@ -440,7 +450,7 @@ export default function Builder() {
 
   function handleApproveSuggestion(suggestionId: string) {
     const suggestion = collab.suggestions.find((item) => item.id === suggestionId);
-    if (!suggestion || !collab.isOwner) return;
+    if (!suggestion || !canGenerateDirectly) return;
     collab.approveSuggestion(suggestionId);
     sendChatMessage(suggestion.message, { bypassOwnerCheck: true });
   }
@@ -502,7 +512,7 @@ export default function Builder() {
         <CollaborationBar
           users={collab.users}
           connected={collab.connected}
-          isOwner={collab.isOwner}
+          isOwner={canGenerateDirectly}
           suggestions={collab.suggestions}
           onApproveSuggestion={handleApproveSuggestion}
         />
@@ -518,12 +528,13 @@ export default function Builder() {
             <ChatPanel
               onSend={(message) => sendChatMessage(message)}
               onStop={stopChatMessage}
-              isOwner={collab.isOwner}
+              isOwner={canGenerateDirectly}
               users={collab.users}
               cursors={collab.cursors}
               onCursorChange={collab.syncCursor}
               suggestions={collab.suggestions}
               onApproveSuggestion={handleApproveSuggestion}
+              prefillInput={prefillInput}
             />
           </div>
         </Panel>

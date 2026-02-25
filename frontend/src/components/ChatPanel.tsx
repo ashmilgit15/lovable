@@ -31,6 +31,11 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 
+function isNearBottom(element: HTMLDivElement, threshold = 80): boolean {
+  const remaining = element.scrollHeight - (element.scrollTop + element.clientHeight);
+  return remaining <= threshold;
+}
+
 interface ChatPanelProps {
   onSend: (message: string) => void;
   onStop: () => void;
@@ -44,6 +49,10 @@ interface ChatPanelProps {
     message: string;
   }>;
   onApproveSuggestion: (suggestionId: string) => void;
+  prefillInput?: {
+    text: string;
+    nonce: string | number;
+  } | null;
 }
 
 const TOOL_OPTIONS: Array<{
@@ -99,6 +108,7 @@ export default function ChatPanel({
   onCursorChange,
   suggestions,
   onApproveSuggestion,
+  prefillInput,
 }: ChatPanelProps) {
   const messages = useBuilderStore((state) => state.messages);
   const isStreaming = useBuilderStore((state) => state.isStreaming);
@@ -110,12 +120,13 @@ export default function ChatPanel({
   const todoPlan = useBuilderStore((state) => state.todoPlan);
   const [inputValue, setInputValue] = useState("");
   const [savingMessageId, setSavingMessageId] = useState<string | null>(null);
+  const [stickToBottom, setStickToBottom] = useState(true);
   const scrollViewportRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const enabledTools = TOOL_OPTIONS.filter((option) => chatTools[option.key]);
 
   useEffect(() => {
-    if (!scrollViewportRef.current) return;
+    if (!scrollViewportRef.current || !stickToBottom) return;
     scrollViewportRef.current.scrollTop = scrollViewportRef.current.scrollHeight;
   }, [
     messages,
@@ -125,6 +136,7 @@ export default function ChatPanel({
     generationProgress,
     fileProgress,
     todoPlan,
+    stickToBottom,
   ]);
 
   useEffect(() => {
@@ -136,11 +148,29 @@ export default function ChatPanel({
     )}px`;
   }, [inputValue]);
 
+  useEffect(() => {
+    if (!prefillInput?.text) return;
+    setInputValue(prefillInput.text);
+    setStickToBottom(true);
+
+    requestAnimationFrame(() => {
+      const textarea = textareaRef.current;
+      if (!textarea) return;
+      textarea.focus();
+      const end = textarea.value.length;
+      textarea.selectionStart = end;
+      textarea.selectionEnd = end;
+      textarea.style.height = "auto";
+      textarea.style.height = `${Math.min(textarea.scrollHeight, 120)}px`;
+    });
+  }, [prefillInput?.nonce, prefillInput?.text]);
+
   const handleSubmit = (event?: React.FormEvent) => {
     event?.preventDefault();
     if (!inputValue.trim() || isStreaming) return;
 
     onSend(inputValue.trim());
+    setStickToBottom(true);
     setInputValue("");
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
@@ -157,6 +187,12 @@ export default function ChatPanel({
   const handleCursorSync = () => {
     const position = textareaRef.current?.selectionStart || 0;
     onCursorChange({ position });
+  };
+
+  const handleScrollViewport = () => {
+    const viewport = scrollViewportRef.current;
+    if (!viewport) return;
+    setStickToBottom(isNearBottom(viewport));
   };
 
   const handleSaveTemplate = async (content: string, messageId: string) => {
@@ -231,8 +267,9 @@ export default function ChatPanel({
       </div>
 
       <div
-        className="no-scrollbar flex-1 space-y-6 overflow-y-auto p-4 scroll-smooth"
+        className="no-scrollbar flex flex-1 flex-col space-y-6 overflow-y-auto p-4 scroll-smooth"
         ref={scrollViewportRef}
+        onScroll={handleScrollViewport}
       >
         {messages.length === 0 && !isStreaming ? (
           <div className="animate-in fade-in duration-500 py-12 text-center text-slate-500">
@@ -252,8 +289,10 @@ export default function ChatPanel({
           <div
             key={message.id}
             className={cn(
-              "group flex max-w-[90%] flex-col gap-1",
-              message.role === "user" ? "self-end items-end" : "self-start items-start"
+              "group flex w-fit max-w-[90%] flex-col gap-1",
+              message.role === "user"
+                ? "ml-auto self-end items-end"
+                : "self-start items-start"
             )}
           >
             <div
@@ -275,7 +314,7 @@ export default function ChatPanel({
                   ) : null}
                 </div>
               ) : null}
-              <div className="whitespace-pre-wrap">{message.content}</div>
+              <div className="whitespace-pre-wrap break-words">{message.content}</div>
             </div>
 
             <div className="flex items-center gap-2 px-1">

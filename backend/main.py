@@ -70,6 +70,12 @@ app.add_middleware(
 app.add_middleware(RequestObservabilityMiddleware, registry=metrics_registry)
 app.add_middleware(SecurityHeadersMiddleware)
 
+@app.get("/")
+@app.head("/")
+async def root():
+    return {"status": "ok", "message": "Lovable Local API is running"}
+
+
 # Health endpoints
 @app.get("/health")
 @app.get("/api/health")

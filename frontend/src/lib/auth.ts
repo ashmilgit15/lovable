@@ -3,8 +3,69 @@
  */
 
 import { backendWsUrl } from "./backend";
+import { CLERK_ENABLED } from "./clerkConfig";
 
 let getTokenFn: (() => Promise<string | null>) | null = null;
+let tokenRegistrationWaiters: Array<() => void> = [];
+
+function resolveTokenRegistrationWaiters() {
+    if (tokenRegistrationWaiters.length === 0) return;
+    for (const resolve of tokenRegistrationWaiters) {
+        resolve();
+    }
+    tokenRegistrationWaiters = [];
+}
+
+async function waitForTokenRegistration(timeoutMs = 4000): Promise<void> {
+    if (getTokenFn || typeof window === "undefined") return;
+
+    await Promise.race([
+        new Promise<void>((resolve) => {
+            tokenRegistrationWaiters.push(resolve);
+        }),
+        new Promise<void>((resolve) => {
+            window.setTimeout(resolve, timeoutMs);
+        }),
+    ]);
+}
+
+function delay(ms: number): Promise<void> {
+    return new Promise((resolve) => {
+        window.setTimeout(resolve, ms);
+    });
+}
+
+async function getAuthToken(options?: {
+    requireToken?: boolean;
+    timeoutMs?: number;
+}): Promise<string | null> {
+    const requireToken = options?.requireToken ?? false;
+    const timeoutMs = options?.timeoutMs ?? 6000;
+
+    if (!getTokenFn && CLERK_ENABLED) {
+        await waitForTokenRegistration(timeoutMs);
+    }
+
+    if (!getTokenFn) {
+        if (requireToken && CLERK_ENABLED) {
+            throw new Error("Authentication is not ready yet.");
+        }
+        return null;
+    }
+
+    const endAt = Date.now() + timeoutMs;
+    while (true) {
+        const token = await getTokenFn().catch(() => null);
+        if (token) return token;
+        if (!CLERK_ENABLED || Date.now() >= endAt) break;
+        await delay(250);
+    }
+
+    if (requireToken && CLERK_ENABLED) {
+        throw new Error("Authentication token is not ready yet.");
+    }
+    return null;
+}
 
 /**
  * Register the Clerk `getToken` function so API helpers can use it.
@@ -12,6 +73,7 @@ let getTokenFn: (() => Promise<string | null>) | null = null;
  */
 export function registerGetToken(fn: () => Promise<string | null>) {
     getTokenFn = fn;
+    resolveTokenRegistrationWaiters();
 }
 
 /**
@@ -19,8 +81,7 @@ export function registerGetToken(fn: () => Promise<string | null>) {
  * Returns an empty object if no token is available (e.g. unauthenticated).
  */
 export async function authHeaders(): Promise<Record<string, string>> {
-    if (!getTokenFn) return {};
-    const token = await getTokenFn();
+    const token = await getAuthToken({ requireToken: CLERK_ENABLED });
     if (!token) return {};
     return { Authorization: `Bearer ${token}` };
 }
@@ -50,9 +111,10 @@ export async function authFetch(
  */
 export async function authenticatedWsUrl(path: string): Promise<string> {
     const base = backendWsUrl(path);
-
-    if (!getTokenFn) return base;
-    const token = await getTokenFn();
+    const token = await getAuthToken({
+        requireToken: CLERK_ENABLED,
+        timeoutMs: 8000,
+    });
     if (!token) return base;
     return `${base}${base.includes("?") ? "&" : "?"}token=${encodeURIComponent(token)}`;
 }

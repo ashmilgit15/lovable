@@ -172,6 +172,23 @@ def parse_ai_response(text: str) -> ParsedResponse:
     return ParsedResponse(files=files, explanation=explanation.strip())
 
 
+def sanitize_assistant_message_text(text: str) -> str:
+    """
+    Remove generated code/file payloads from assistant output and keep user-facing summary text.
+    """
+    raw = (text or "").strip()
+    if not raw:
+        return ""
+
+    parsed = parse_ai_response(raw)
+    candidate = (parsed.explanation or raw).strip()
+    candidate = re.sub(r"^\s*EXPLANATION:\s*", "", candidate, flags=re.IGNORECASE)
+    candidate = re.sub(r"(?im)^FILE:\s*.+$", "", candidate)
+    candidate = re.sub(r"```[\w-]*\n.*?```", "", candidate, flags=re.DOTALL)
+    candidate = re.sub(r"\n{3,}", "\n\n", candidate)
+    return candidate.strip()
+
+
 async def stream_from_ollama(messages: list[dict], model: str | None = None) -> AsyncGenerator[str, None]:
     """Stream response from Ollama using httpx."""
     model = model or OLLAMA_DEFAULT_MODEL

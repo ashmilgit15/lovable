@@ -138,10 +138,12 @@ export function useWebSocket(url: string | null, options: UseWebSocketOptions) {
     };
   }, [url]);
 
-  const send = (data: unknown) => {
+  const send = (data: unknown): boolean => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify(data));
+      return true;
     }
+    return false;
   };
 
   return { send, connected, reconnecting, backendReady };
