@@ -40,3 +40,10 @@ class TestClerkAuthMiddleware:
         response = client.get("/private")
         assert response.status_code == 401
         assert response.json() == {"detail": "Missing authentication token"}
+
+    def test_options_preflight_skips_auth(self, monkeypatch):
+        monkeypatch.setattr(auth, "AUTH_ENABLED", True)
+        client = TestClient(_build_app(), raise_server_exceptions=False)
+
+        response = client.options("/private")
+        assert response.status_code != 401

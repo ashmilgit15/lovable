@@ -50,15 +50,6 @@ rate_limiter = InMemoryRateLimiter(
 cors_settings = load_cors_settings()
 
 # CORS configuration
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=cors_settings.allow_origins,
-    allow_origin_regex=cors_settings.allow_origin_regex,
-    allow_credentials=cors_settings.allow_credentials,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
 # Clerk auth middleware (no-op when CLERK_SECRET_KEY is not set)
 app.add_middleware(ClerkAuthMiddleware)
 app.add_middleware(
@@ -68,6 +59,14 @@ app.add_middleware(
 )
 app.add_middleware(RequestObservabilityMiddleware, registry=metrics_registry)
 app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=cors_settings.allow_origins,
+    allow_origin_regex=cors_settings.allow_origin_regex,
+    allow_credentials=cors_settings.allow_credentials,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 @app.get("/")
 @app.head("/")

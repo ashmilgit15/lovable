@@ -218,6 +218,10 @@ class ClerkAuthMiddleware(BaseHTTPMiddleware):
             request.state.session_id = "local"
             return await call_next(request)
 
+        # Always allow preflight requests to reach CORS middleware.
+        if request.method.upper() == "OPTIONS":
+            return await call_next(request)
+
         # Skip public paths
         request_path = _normalize_path(request.url.path)
         if request_path in _NORMALIZED_PUBLIC_PATHS:
