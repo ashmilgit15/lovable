@@ -12,7 +12,11 @@ import shutil
 from database import get_session
 from models import Project, ProjectFile, ChatMessage, utcnow
 from auth import get_request_user_id
-from project_access import require_project_for_user, owned_project_filter
+from project_access import (
+    claim_legacy_projects_for_user,
+    require_project_for_user,
+    owned_project_filter,
+)
 from preview_bridge import ensure_preview_bridge
 from autofix import run_project_autofix
 from runtime_security import is_untrusted_code_execution_enabled
@@ -39,7 +43,7 @@ def scaffold_project(project_id: str):
     # Define file content
     files = {
         "package.json": '''{
-  "name": "lovable-project",
+  "name": "one-project",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -327,7 +331,7 @@ function App() {
     <div className="min-h-screen bg-background flex items-center justify-center p-4">
       <div className="max-w-md w-full text-center space-y-4">
         <h1 className="text-4xl font-bold tracking-tight">
-          Welcome to Lovable
+          Welcome to One
         </h1>
         <p className="text-muted-foreground">
           Your AI-generated app is ready to be built.
@@ -343,7 +347,7 @@ export default App''',
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Lovable Project</title>
+    <title>One Project</title>
   </head>
   <body>
     <div id="root"></div>
@@ -498,6 +502,7 @@ def update_project(
 @router.get("")
 def list_projects(request: Request, session: Session = Depends(get_session)):
     user_id = get_request_user_id(request)
+    claim_legacy_projects_for_user(session, user_id)
     projects = session.exec(
         select(Project)
         .where(owned_project_filter(user_id))
@@ -515,6 +520,7 @@ def list_projects_paged(
     search: Optional[str] = Query(default=None),
 ):
     user_id = get_request_user_id(request)
+    claim_legacy_projects_for_user(session, user_id)
     owner_filter = owned_project_filter(user_id)
     query = select(Project).where(owner_filter)
     count_query = select(func.count()).select_from(Project).where(owner_filter)

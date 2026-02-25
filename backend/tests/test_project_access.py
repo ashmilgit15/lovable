@@ -13,7 +13,11 @@ from sqlmodel import Session, SQLModel, create_engine, select
 from sqlalchemy.pool import StaticPool
 
 from models import Project
-from project_access import require_project_for_user, owned_project_filter
+from project_access import (
+    claim_legacy_projects_for_user,
+    require_project_for_user,
+    owned_project_filter,
+)
 
 
 @pytest.fixture
@@ -64,3 +68,31 @@ def test_owned_project_filter_returns_only_matching_owner(ownership_session: Ses
 
     assert {project.owner_id for project in user_a_projects} == {"user_a"}
     assert {project.owner_id for project in local_projects} == {"local"}
+
+
+def test_require_project_for_user_claims_legacy_local_owner(
+    ownership_session: Session,
+):
+    project = Project(name="legacy", owner_id="local")
+    ownership_session.add(project)
+    ownership_session.commit()
+
+    resolved = require_project_for_user(ownership_session, project.id, "user_a")
+    assert resolved.owner_id == "user_a"
+
+
+def test_claim_legacy_projects_for_user_migrates_all_local(
+    ownership_session: Session,
+):
+    ownership_session.add(Project(name="legacy-1", owner_id="local"))
+    ownership_session.add(Project(name="legacy-2", owner_id="local"))
+    ownership_session.add(Project(name="owned", owner_id="user_b"))
+    ownership_session.commit()
+
+    migrated = claim_legacy_projects_for_user(ownership_session, "user_a")
+    assert migrated == 2
+
+    user_a_projects = ownership_session.exec(
+        select(Project).where(owned_project_filter("user_a"))
+    ).all()
+    assert len(user_a_projects) == 2

@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { useParams, useSearchParams } from "react-router-dom";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Panel,
@@ -46,9 +46,11 @@ function sanitizeAssistantMessage(content: string): string {
 export default function Builder() {
   const { projectId } = useParams<{ projectId: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
   const [workspaceView, setWorkspaceView] = useState<"preview" | "code">("preview");
   const store = useBuilderStore();
   const queryClient = useQueryClient();
+  const projectErrorHandledRef = useRef<string | null>(null);
   const prefillInput = useMemo(() => {
     if (!projectId) return null;
     const promptFromSession = sessionStorage.getItem(
@@ -60,11 +62,20 @@ export default function Builder() {
     return { text, nonce: `${projectId}:${text}` };
   }, [projectId, searchParams]);
 
-  const { data } = useQuery({
+  const {
+    data,
+    error: projectError,
+    isError: isProjectError,
+    isSuccess: isProjectLoaded,
+  } = useQuery({
     queryKey: ["project", projectId],
     queryFn: () => getProject(projectId!),
     enabled: !!projectId,
+    retry: false,
   });
+  const projectReady = Boolean(
+    projectId && isProjectLoaded && data?.project?.id === projectId
+  );
 
   useEffect(() => {
     if (!data || !projectId) return;
@@ -94,6 +105,30 @@ export default function Builder() {
   }, [data, projectId]);
 
   useEffect(() => {
+    projectErrorHandledRef.current = null;
+  }, [projectId]);
+
+  useEffect(() => {
+    if (!projectId || !isProjectError) return;
+
+    const detail =
+      projectError instanceof Error
+        ? projectError.message
+        : "Failed to load project.";
+    const errorKey = `${projectId}:${detail}`;
+    if (projectErrorHandledRef.current === errorKey) return;
+    projectErrorHandledRef.current = errorKey;
+
+    if (detail.toLowerCase().includes("project not found")) {
+      toast.error("Project not found. Please create a new project.");
+      navigate("/dashboard", { replace: true });
+      return;
+    }
+
+    toast.error("Failed to load project.");
+  }, [isProjectError, navigate, projectError, projectId]);
+
+  useEffect(() => {
     return () => {
       useBuilderStore.getState().reset();
     };
@@ -117,11 +152,11 @@ export default function Builder() {
     }
   }, [projectId, searchParams, setSearchParams]);
 
-  const wsUrl = projectId
+  const wsUrl = projectReady && projectId
     ? backendWsUrl(`/ws/projects/${projectId}/chat`)
     : null;
 
-  const collab = useCollabSocket(projectId, {
+  const collab = useCollabSocket(projectReady ? projectId : undefined, {
     onFileUpdate: (filename, content) => {
       useBuilderStore.getState().updateFile(filename, content);
     },
@@ -144,7 +179,7 @@ export default function Builder() {
     collab.connected &&
     collab.users.some((user) => user.is_owner && user.id !== collab.userId);
   const suggestionMode = hasRemoteOwner && !collab.isOwner;
-  const canGenerateDirectly = !suggestionMode;
+  const canGenerateDirectly = projectReady && !suggestionMode;
 
   function onWsMessage(raw: unknown) {
     const msg = (raw || {}) as BuilderWsMessage;
@@ -334,6 +369,10 @@ export default function Builder() {
     }
   ) {
     if (!message.trim()) return;
+    if (!projectReady || !projectId) {
+      toast.error("Project is not available.");
+      return;
+    }
 
     if (!options?.bypassOwnerCheck && suggestionMode) {
       collab.sendSuggestion(message);
@@ -375,7 +414,7 @@ export default function Builder() {
   }
 
   async function stopChatMessage() {
-    if (!projectId || !store.isStreaming) return;
+    if (!projectReady || !projectId || !store.isStreaming) return;
     store.addGenerationProgress({
       phase: "cancel",
       status: "in_progress",
