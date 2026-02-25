@@ -290,6 +290,8 @@ async def chat_websocket(websocket: WebSocket, project_id: str):
             requested_model = (data.get("model") or "").strip()
             requested_provider_id = (data.get("provider_id") or "").strip()
             requested_tools = normalize_tool_config(data.get("tools"))
+            requested_response_mode = (data.get("response_mode") or "build").strip().lower()
+            ask_mode = requested_response_mode == "ask"
 
             if not user_message:
                 continue
@@ -363,6 +365,7 @@ async def chat_websocket(websocket: WebSocket, project_id: str):
                     "type": "model_routed",
                     "intent": "manual" if requested_model else intent_result.intent.value,
                     "model_used": model_used,
+                    "response_mode": "ask" if ask_mode else "build",
                     **provider_payload,
                 },
             )
@@ -616,6 +619,11 @@ async def chat_websocket(websocket: WebSocket, project_id: str):
                     "\n\nTask planner is enabled. Execute work using the provided checklist. "
                     "Prioritize the current in-progress task and keep changes scoped to checklist items."
                 )
+            if ask_mode:
+                enhanced_system_prompt += (
+                    "\n\nAsk mode is enabled. Reply directly to the user question in plain markdown. "
+                    "Do not output FILE blocks and do not propose file edits unless explicitly asked to switch to build mode."
+                )
 
             ollama_messages = [
                 {
@@ -712,19 +720,25 @@ async def chat_websocket(websocket: WebSocket, project_id: str):
                     GENERATION_CANCEL_FLAGS[project_id] = False
                     continue
 
-                parsed = parse_ai_response(full_response)
-                assistant_summary = sanitize_assistant_message_text(full_response)
-                if not assistant_summary:
-                    assistant_summary = (
-                        f"Updated {len(parsed.files)} files."
-                        if parsed.files
-                        else "Generation complete."
-                    )
-                assistant_content = assistant_summary
+                if ask_mode:
+                    parsed_files = []
+                    assistant_content = (full_response or "").strip() or "Reply generated."
+                    assistant_summary = assistant_content
+                else:
+                    parsed = parse_ai_response(full_response)
+                    parsed_files = parsed.files
+                    assistant_summary = sanitize_assistant_message_text(full_response)
+                    if not assistant_summary:
+                        assistant_summary = (
+                            f"Updated {len(parsed_files)} files."
+                            if parsed_files
+                            else "Generation complete."
+                        )
+                    assistant_content = assistant_summary
 
                 generation_id = str(uuid.uuid4())
                 files_changed: list[str] = []
-                total_files = len(parsed.files)
+                total_files = len(parsed_files)
 
                 if total_files:
                     await safe_send(
@@ -741,7 +755,7 @@ async def chat_websocket(websocket: WebSocket, project_id: str):
                         await safe_send(websocket, {"type": "todo_state", "state": todo_state})
 
                 with Session(engine) as session:
-                    for index, pf in enumerate(parsed.files, start=1):
+                    for index, pf in enumerate(parsed_files, start=1):
                         if not is_safe_path(base_dir, pf.filename):
                             await safe_send(
                                 websocket,
@@ -842,7 +856,7 @@ async def chat_websocket(websocket: WebSocket, project_id: str):
                         )
                         session.commit()
 
-                if parsed.files and is_untrusted_code_execution_enabled():
+                if parsed_files and is_untrusted_code_execution_enabled():
                     from devserver import dev_server_manager
 
                     critical_files = [
@@ -853,7 +867,7 @@ async def chat_websocket(websocket: WebSocket, project_id: str):
                         "postcss.config.js",
                     ]
                     should_restart = any(
-                        f.filename in critical_files for f in parsed.files
+                        f.filename in critical_files for f in parsed_files
                     )
                     try:
                         if should_restart:
@@ -874,7 +888,7 @@ async def chat_websocket(websocket: WebSocket, project_id: str):
                                 ),
                             },
                         )
-                elif parsed.files:
+                elif parsed_files:
                     await safe_send(
                         websocket,
                         {
@@ -899,12 +913,13 @@ async def chat_websocket(websocket: WebSocket, project_id: str):
                                 "content": f.content,
                                 "language": f.language,
                             }
-                            for f in parsed.files
+                            for f in parsed_files
                         ],
                         "explanation": assistant_summary,
                         "content": assistant_content,
                         "generation_id": generation_id,
                         "model_used": generation_model_used,
+                        "response_mode": "ask" if ask_mode else "build",
                         "intent": "manual"
                         if requested_model
                         else intent_result.intent.value,

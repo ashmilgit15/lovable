@@ -36,6 +36,12 @@ function sanitizeAssistantMessage(content: string): string {
   let cleaned = (content || "").trim();
   if (!cleaned) return "";
 
+  const hasStructuredPayload =
+    /(^|\n)\s*FILE:\s*/im.test(cleaned) || /(^|\n)\s*EXPLANATION:\s*/im.test(cleaned);
+  if (!hasStructuredPayload) {
+    return cleaned;
+  }
+
   cleaned = cleaned.replace(/```[\w-]*\n[\s\S]*?```/g, "");
   cleaned = cleaned.replace(/^FILE:\s*.+$/gim, "");
   cleaned = cleaned.replace(/^\s*EXPLANATION:\s*/i, "");
@@ -306,6 +312,10 @@ export default function Builder() {
     if (msg.type === "complete") {
       s.setIsStreaming(false);
       s.clearFileProgress();
+      const responseMode =
+        String((msg as { response_mode?: string }).response_mode || "build") === "ask"
+          ? "ask"
+          : "build";
 
       const currentFiles = useBuilderStore.getState().files;
       const changedFiles: Array<{ filename: string; content: string; language?: string }> = [];
@@ -327,8 +337,14 @@ export default function Builder() {
       }
       s.setPendingChanges({}, null);
 
-      const generatedContent = sanitizeAssistantMessage(String(msg.content || ""));
-      const explanationContent = sanitizeAssistantMessage(String(msg.explanation || ""));
+      const generatedContent =
+        responseMode === "ask"
+          ? String(msg.content || "").trim()
+          : sanitizeAssistantMessage(String(msg.content || ""));
+      const explanationContent =
+        responseMode === "ask"
+          ? String(msg.explanation || "").trim()
+          : sanitizeAssistantMessage(String(msg.explanation || ""));
       const assistantContent =
         generatedContent ||
         explanationContent ||
@@ -352,7 +368,8 @@ export default function Builder() {
       s.addMessage(assistantMessage);
       collab.syncChatMessage(assistantMessage);
 
-      const editedFilesSummary = buildEditedFilesSummary(changedFiles);
+      const editedFilesSummary =
+        responseMode === "build" ? buildEditedFilesSummary(changedFiles) : "";
       if (editedFilesSummary) {
         const fileSummaryMessage: {
           id: string;
@@ -397,6 +414,7 @@ export default function Builder() {
     options?: {
       bypassOwnerCheck?: boolean;
       hideUserMessage?: boolean;
+      responseMode?: "build" | "ask";
     }
   ) {
     if (!message.trim()) return;
@@ -437,6 +455,7 @@ export default function Builder() {
       model: store.selectedModel || undefined,
       provider_id: store.selectedProviderId || undefined,
       tools: store.chatTools,
+      response_mode: options?.responseMode || "build",
     });
     if (!sent) {
       store.setIsStreaming(false);
@@ -596,7 +615,9 @@ export default function Builder() {
         <Panel defaultSize={33} minSize={24} className="flex min-w-[320px] flex-col">
           <div className="panel-surface min-h-0 flex-1 overflow-hidden">
             <ChatPanel
-              onSend={(message) => sendChatMessage(message)}
+              onSend={(message, responseMode) =>
+                sendChatMessage(message, { responseMode })
+              }
               onStop={stopChatMessage}
               isOwner={canGenerateDirectly}
               users={collab.users}

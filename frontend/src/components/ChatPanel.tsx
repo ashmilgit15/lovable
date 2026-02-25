@@ -37,7 +37,7 @@ function isNearBottom(element: HTMLDivElement, threshold = 80): boolean {
 }
 
 interface ChatPanelProps {
-  onSend: (message: string) => void;
+  onSend: (message: string, responseMode: "build" | "ask") => void;
   onStop: () => void;
   isOwner: boolean;
   users: Array<{ id: string; username: string; color: string }>;
@@ -119,6 +119,7 @@ export default function ChatPanel({
   const toggleChatTool = useBuilderStore((state) => state.toggleChatTool);
   const todoPlan = useBuilderStore((state) => state.todoPlan);
   const [inputValue, setInputValue] = useState("");
+  const [responseMode, setResponseMode] = useState<"build" | "ask">("build");
   const [savingMessageId, setSavingMessageId] = useState<string | null>(null);
   const [stickToBottom, setStickToBottom] = useState(true);
   const scrollViewportRef = useRef<HTMLDivElement>(null);
@@ -169,7 +170,7 @@ export default function ChatPanel({
     event?.preventDefault();
     if (!inputValue.trim() || isStreaming) return;
 
-    onSend(inputValue.trim());
+    onSend(inputValue.trim(), responseMode);
     setStickToBottom(true);
     setInputValue("");
     if (textareaRef.current) {
@@ -263,6 +264,39 @@ export default function ChatPanel({
             </Button>
           </div>
         ) : null}
+
+        <div className="mt-2 inline-flex items-center gap-1 rounded-lg border border-white/10 bg-slate-900/60 p-1">
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className={cn(
+              "h-6 px-2 text-[10px]",
+              responseMode === "build"
+                ? "bg-cyan-500/15 text-cyan-200"
+                : "text-slate-400 hover:bg-slate-800/70 hover:text-slate-200"
+            )}
+            onClick={() => setResponseMode("build")}
+            disabled={isStreaming}
+          >
+            Build
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className={cn(
+              "h-6 px-2 text-[10px]",
+              responseMode === "ask"
+                ? "bg-emerald-500/15 text-emerald-200"
+                : "text-slate-400 hover:bg-slate-800/70 hover:text-slate-200"
+            )}
+            onClick={() => setResponseMode("ask")}
+            disabled={isStreaming}
+          >
+            Ask
+          </Button>
+        </div>
 
       </div>
 
@@ -551,7 +585,13 @@ export default function ChatPanel({
             onKeyDown={handleKeyDown}
             onClick={handleCursorSync}
             onKeyUp={handleCursorSync}
-            placeholder={isOwner ? "Type a message..." : "Suggest a message for the owner..."}
+            placeholder={
+              isOwner
+                ? responseMode === "ask"
+                  ? "Ask a question..."
+                  : "Describe what to build..."
+                : "Suggest a message for the owner..."
+            }
             className="min-h-[44px] max-h-[120px] flex-1 resize-none border-none bg-transparent px-2 py-3 text-sm text-slate-200 placeholder:text-slate-500 outline-none"
             rows={1}
             disabled={isStreaming}
@@ -610,7 +650,7 @@ export default function ChatPanel({
 
         <div className="mt-2 text-center text-[10px] text-slate-600">
           Press <kbd className="rounded border border-white/10 bg-slate-900 px-1 py-0.5 font-sans">Enter</kbd> to{" "}
-          {isOwner ? "send" : "suggest"},{" "}
+          {isOwner ? (responseMode === "ask" ? "ask" : "build") : "suggest"},{" "}
           <kbd className="rounded border border-white/10 bg-slate-900 px-1 py-0.5 font-sans">Shift + Enter</kbd> for new line
         </div>
         {Object.keys(cursors).length > 0 ? (
