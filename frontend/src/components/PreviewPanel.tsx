@@ -188,6 +188,28 @@ function createDefaultRuntimeIndexHtml(entry: string): string {
 </html>`;
 }
 
+function collectUsedPackages(sandpackFiles: Record<string, string>): Set<string> {
+  const used = new Set<string>();
+  const sourceFilePattern = /\.(?:[cm]?[jt]sx?)$/i;
+  const importPattern =
+    /\b(?:import|export)\s+(?:[^"'`]+?\s+from\s+)?["'`]([^"'`]+)["'`]|import\(\s*["'`]([^"'`]+)["'`]\s*\)/g;
+
+  for (const [path, content] of Object.entries(sandpackFiles)) {
+    if (!sourceFilePattern.test(path)) continue;
+    let match: RegExpExecArray | null;
+    while ((match = importPattern.exec(content)) !== null) {
+      const specifier = (match[1] || match[2] || "").trim();
+      if (!specifier || specifier.startsWith(".") || specifier.startsWith("/")) continue;
+      const packageName = specifier.startsWith("@")
+        ? specifier.split("/").slice(0, 2).join("/")
+        : specifier.split("/")[0];
+      if (packageName) used.add(packageName);
+    }
+  }
+
+  return used;
+}
+
 function buildRuntimeCssSupport(
   sandpackFiles: Record<string, string>
 ): { cssPath: string | null; includeTailwindCdn: boolean } {
@@ -289,7 +311,8 @@ function normalizeIndexHtmlForRuntime(
 function ensureRuntimePackageJson(
   sandpackFiles: Record<string, string>,
   entry: string,
-  hasTypescript: boolean
+  hasTypescript: boolean,
+  usedPackages: Set<string>
 ): Record<string, string> {
   const rawPackageJson = sandpackFiles["/package.json"];
   const parsed = parsePackageJson(rawPackageJson);
@@ -307,7 +330,11 @@ function ensureRuntimePackageJson(
   ];
 
   if (!parsed) {
-    const dependencies = parseSandpackDeps(rawPackageJson);
+    const dependencies: Record<string, string> = {};
+    const discovered = parseSandpackDeps(rawPackageJson);
+    for (const pkg of usedPackages) {
+      dependencies[pkg] = discovered[pkg] || "latest";
+    }
     if (!dependencies.react) dependencies.react = "^19.0.0";
     if (!dependencies["react-dom"]) dependencies["react-dom"] = "^19.0.0";
 
@@ -330,8 +357,16 @@ function ensureRuntimePackageJson(
   };
 
   for (const [name, version] of Object.entries(allDependencies)) {
+    if (!usedPackages.has(name) && !/^react(-dom)?$/i.test(name)) continue;
     if (blockedPackages.some((pattern) => pattern.test(name))) continue;
     runtimeDependencies[name] = version;
+  }
+
+  for (const pkg of usedPackages) {
+    if (blockedPackages.some((pattern) => pattern.test(pkg))) continue;
+    if (!runtimeDependencies[pkg]) {
+      runtimeDependencies[pkg] = allDependencies[pkg] || "latest";
+    }
   }
 
   if (!runtimeDependencies.react) runtimeDependencies.react = "^19.0.0";
@@ -399,7 +434,8 @@ function buildSandpackProject(files: Record<string, FileData>) {
   const dependencies = ensureRuntimePackageJson(
     sandpackFiles,
     effectiveEntry,
-    hasTypescript
+    hasTypescript,
+    collectUsedPackages(sandpackFiles)
   );
   const cssSupport = buildRuntimeCssSupport(sandpackFiles);
   sandpackFiles["/index.html"] = normalizeIndexHtmlForRuntime(

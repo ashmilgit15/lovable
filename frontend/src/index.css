@@ -236,7 +236,7 @@
   }
 
   .panel-surface {
-    @apply rounded-2xl border border-white/10 bg-slate-900/70 backdrop-blur-xl shadow-[0_12px_32px_rgba(2, 8, 23, 0.42)];
+    @apply rounded-2xl border border-white/10 bg-slate-900/70 backdrop-blur-xl shadow-[0_12px_32px_rgba(2,8,23,0.42)];
   }
 
   .panel-header {
