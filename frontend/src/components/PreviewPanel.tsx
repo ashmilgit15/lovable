@@ -46,32 +46,38 @@ function normalizeSandpackPath(filename: string): string {
   return normalized.startsWith("/") ? normalized : `/${normalized}`;
 }
 
-function parseSandpackDeps(rawPackageJson: string | undefined): {
-  dependencies: Record<string, string>;
-  devDependencies: Record<string, string>;
-} {
+function parseSandpackDeps(
+  rawPackageJson: string | undefined
+): Record<string, string> {
   if (!rawPackageJson) {
-    return { dependencies: {}, devDependencies: {} };
+    return {};
   }
 
   try {
     const parsed = JSON.parse(rawPackageJson) as {
       dependencies?: Record<string, unknown>;
-      devDependencies?: Record<string, unknown>;
     };
-    const dependencies: Record<string, string> = {};
-    const devDependencies: Record<string, string> = {};
+    const runtimeDependencies: Record<string, string> = {};
+    const blockedPackages = [
+      /^vite$/i,
+      /^esbuild/i,
+      /^@vitejs\//i,
+      /^typescript$/i,
+      /^eslint/i,
+      /^tailwindcss$/i,
+      /^postcss$/i,
+      /^autoprefixer$/i,
+    ];
 
     for (const [name, value] of Object.entries(parsed.dependencies || {})) {
-      if (typeof value === "string") dependencies[name] = value;
-    }
-    for (const [name, value] of Object.entries(parsed.devDependencies || {})) {
-      if (typeof value === "string") devDependencies[name] = value;
+      if (typeof value !== "string") continue;
+      if (blockedPackages.some((pattern) => pattern.test(name))) continue;
+      runtimeDependencies[name] = value;
     }
 
-    return { dependencies, devDependencies };
+    return runtimeDependencies;
   } catch {
-    return { dependencies: {}, devDependencies: {} };
+    return {};
   }
 }
 
@@ -116,7 +122,7 @@ function buildSandpackProject(files: Record<string, FileData>) {
   }
 
   const packageJsonRaw = sandpackFiles["/package.json"];
-  const { dependencies, devDependencies } = parseSandpackDeps(packageJsonRaw);
+  const dependencies = parseSandpackDeps(packageJsonRaw);
 
   const entryCandidates = [
     "/src/main.tsx",
@@ -145,7 +151,6 @@ function buildSandpackProject(files: Record<string, FileData>) {
   return {
     files: sandpackFiles,
     dependencies,
-    devDependencies,
     entry,
     activeFile,
     fileCount: Object.keys(sandpackFiles).length,
@@ -163,6 +168,7 @@ export default function PreviewPanel({ onSendVisualPrompt }: PreviewPanelProps) 
   const [sandboxRefreshKey, setSandboxRefreshKey] = useState(0);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const lastSandboxRecoverAtRef = useRef(0);
 
   const isHostedClient = useMemo(() => {
     if (typeof window === "undefined") return false;
@@ -191,6 +197,46 @@ export default function PreviewPanel({ onSendVisualPrompt }: PreviewPanelProps) 
     if (!scrollRef.current) return;
     scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [logs]);
+
+  useEffect(() => {
+    if (!useBrowserPreview || typeof window === "undefined") return;
+
+    const maybeRecover = (message: string) => {
+      if (!message.toLowerCase().includes("failed to get shell by id")) return;
+      const now = Date.now();
+      if (now - lastSandboxRecoverAtRef.current < 3000) return;
+      lastSandboxRecoverAtRef.current = now;
+      setSandboxRefreshKey((key) => key + 1);
+    };
+
+    const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
+      const reason = event.reason as unknown;
+      if (typeof reason === "string") {
+        maybeRecover(reason);
+        return;
+      }
+      if (reason instanceof Error) {
+        maybeRecover(reason.message || "");
+        return;
+      }
+      try {
+        maybeRecover(JSON.stringify(reason ?? ""));
+      } catch {
+        // no-op
+      }
+    };
+
+    const handleWindowError = (event: ErrorEvent) => {
+      maybeRecover(event.message || "");
+    };
+
+    window.addEventListener("unhandledrejection", handleUnhandledRejection);
+    window.addEventListener("error", handleWindowError);
+    return () => {
+      window.removeEventListener("unhandledrejection", handleUnhandledRejection);
+      window.removeEventListener("error", handleWindowError);
+    };
+  }, [useBrowserPreview]);
 
   const previewUrl = useMemo(() => {
     if (!port) return null;
@@ -454,12 +500,11 @@ export default function PreviewPanel({ onSendVisualPrompt }: PreviewPanelProps) 
           sandpackProject.fileCount > 0 ? (
             <div className="h-full w-full overflow-hidden bg-[#0a0a0a]">
               <SandpackProvider
-                key={sandboxRefreshKey}
+                key={`${activeProjectId ?? "project"}:${sandboxRefreshKey}`}
                 template={sandpackProject.template}
                 files={sandpackProject.files}
                 customSetup={{
                   dependencies: sandpackProject.dependencies,
-                  devDependencies: sandpackProject.devDependencies,
                   entry: sandpackProject.entry,
                 }}
                 options={{
