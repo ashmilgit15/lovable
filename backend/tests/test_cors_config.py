@@ -1,4 +1,9 @@
-from cors_config import DEFAULT_CORS_ORIGINS, load_cors_settings, parse_cors_origins
+from cors_config import (
+    DEFAULT_CORS_ORIGIN_REGEX,
+    DEFAULT_CORS_ORIGINS,
+    load_cors_settings,
+    parse_cors_origins,
+)
 
 
 def test_parse_cors_origins_normalizes_and_deduplicates():
@@ -16,7 +21,7 @@ def test_load_cors_settings_defaults_when_empty(monkeypatch):
     settings = load_cors_settings()
 
     assert settings.allow_origins == DEFAULT_CORS_ORIGINS
-    assert settings.allow_origin_regex is None
+    assert settings.allow_origin_regex == DEFAULT_CORS_ORIGIN_REGEX
     assert settings.allow_credentials is True
 
 

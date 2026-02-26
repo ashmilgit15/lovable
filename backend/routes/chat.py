@@ -695,6 +695,10 @@ async def chat_websocket(websocket: WebSocket, project_id: str):
                     extra_headers=extra_headers,
                 )
 
+                token_count = 0
+                todo_progress_tick = 0
+                TOKENS_PER_TODO_TICK = 150
+
                 async for token in iter_tokens_with_timeouts(token_stream):
                     if GENERATION_CANCEL_FLAGS.get(project_id):
                         canceled = True
@@ -712,7 +716,18 @@ async def chat_websocket(websocket: WebSocket, project_id: str):
                             },
                         )
                     full_response += token
+                    token_count += 1
                     await safe_send(websocket, {"type": "token", "content": token})
+
+                    # Smoothly progress todo plan during streaming
+                    if task_planner_enabled:
+                        new_tick = token_count // TOKENS_PER_TODO_TICK
+                        if new_tick > todo_progress_tick and new_tick <= 8:
+                            todo_progress_tick = new_tick
+                            # Smoothly progress from 0.2 to 0.85 over streaming
+                            ratio = min(0.85, 0.2 + (new_tick * 0.08))
+                            todo_state = progress_plan(project_id, ratio)
+                            await safe_send(websocket, {"type": "todo_state", "state": todo_state})
 
                 if canceled:
                     await safe_send(

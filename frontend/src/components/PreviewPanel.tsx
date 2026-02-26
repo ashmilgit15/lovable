@@ -1,4 +1,4 @@
-import { useBuilderStore } from "@/store/builderStore";
+import { useBuilderStore, type FileData } from "@/store/builderStore";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   RefreshCw,
@@ -10,6 +10,7 @@ import {
   Play,
   MousePointer2,
 } from "lucide-react";
+import { SandpackPreview, SandpackProvider } from "@codesandbox/sandpack-react";
 import { useDevServerSocket } from "@/lib/useDevServerSocket";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -40,6 +41,79 @@ interface BridgeMessage {
   [key: string]: unknown;
 }
 
+function normalizeSandpackPath(filename: string): string {
+  const normalized = filename.replace(/\\/g, "/");
+  return normalized.startsWith("/") ? normalized : `/${normalized}`;
+}
+
+function parseSandpackDeps(rawPackageJson: string | undefined): {
+  dependencies: Record<string, string>;
+  devDependencies: Record<string, string>;
+} {
+  if (!rawPackageJson) {
+    return { dependencies: {}, devDependencies: {} };
+  }
+
+  try {
+    const parsed = JSON.parse(rawPackageJson) as {
+      dependencies?: Record<string, unknown>;
+      devDependencies?: Record<string, unknown>;
+    };
+    const dependencies: Record<string, string> = {};
+    const devDependencies: Record<string, string> = {};
+
+    for (const [name, value] of Object.entries(parsed.dependencies || {})) {
+      if (typeof value === "string") dependencies[name] = value;
+    }
+    for (const [name, value] of Object.entries(parsed.devDependencies || {})) {
+      if (typeof value === "string") devDependencies[name] = value;
+    }
+
+    return { dependencies, devDependencies };
+  } catch {
+    return { dependencies: {}, devDependencies: {} };
+  }
+}
+
+function buildSandpackProject(files: Record<string, FileData>) {
+  const sandpackFiles: Record<string, string> = {};
+
+  for (const file of Object.values(files)) {
+    if (!file?.filename) continue;
+    sandpackFiles[normalizeSandpackPath(file.filename)] = file.content ?? "";
+  }
+
+  const packageJsonRaw = sandpackFiles["/package.json"];
+  const { dependencies, devDependencies } = parseSandpackDeps(packageJsonRaw);
+
+  const entryCandidates = [
+    "/src/main.tsx",
+    "/src/main.jsx",
+    "/src/index.tsx",
+    "/src/index.jsx",
+    "/main.tsx",
+    "/main.jsx",
+    "/index.tsx",
+    "/index.jsx",
+  ];
+  const entry = entryCandidates.find((candidate) => sandpackFiles[candidate]);
+  const activeFile = entry || Object.keys(sandpackFiles)[0] || "/src/main.tsx";
+
+  const hasTypescript = Object.keys(sandpackFiles).some(
+    (path) => path.endsWith(".ts") || path.endsWith(".tsx")
+  );
+
+  return {
+    files: sandpackFiles,
+    dependencies,
+    devDependencies,
+    entry,
+    activeFile,
+    fileCount: Object.keys(sandpackFiles).length,
+    template: hasTypescript ? "vite-react-ts" : "vite-react",
+  } as const;
+}
+
 export default function PreviewPanel({ onSendVisualPrompt }: PreviewPanelProps) {
   const activeProjectId = useBuilderStore((state) => state.activeProjectId);
   const files = useBuilderStore((state) => state.files);
@@ -47,8 +121,18 @@ export default function PreviewPanel({ onSendVisualPrompt }: PreviewPanelProps) 
   const [showLogs, setShowLogs] = useState(false);
   const [visualEditEnabled, setVisualEditEnabled] = useState(false);
   const [selectedElement, setSelectedElement] = useState<VisualElement | null>(null);
+  const [sandboxRefreshKey, setSandboxRefreshKey] = useState(0);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  const isHostedClient = useMemo(() => {
+    if (typeof window === "undefined") return false;
+    const host = window.location.hostname.toLowerCase();
+    return host !== "localhost" && host !== "127.0.0.1";
+  }, []);
+
+  const useBrowserPreview = isHostedClient;
+  const sandpackProject = useMemo(() => buildSandpackProject(files), [files]);
 
   const {
     logs,
@@ -60,7 +144,9 @@ export default function PreviewPanel({ onSendVisualPrompt }: PreviewPanelProps) 
     startServer,
     stopServer,
     restartServer,
-  } = useDevServerSocket(activeProjectId || undefined);
+  } = useDevServerSocket(
+    useBrowserPreview ? undefined : (activeProjectId || undefined)
+  );
 
   useEffect(() => {
     if (!scrollRef.current) return;
@@ -165,7 +251,14 @@ export default function PreviewPanel({ onSendVisualPrompt }: PreviewPanelProps) 
       <div className="panel-header flex h-[40px] shrink-0 items-center justify-between border-b border-white/10 bg-slate-950/35 px-4 py-2">
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2">
-            {isRunning ? (
+            {useBrowserPreview ? (
+              <div className="flex items-center gap-1.5 rounded-full border border-cyan-500/20 bg-cyan-500/10 px-2 py-0.5">
+                <div className="h-1.5 w-1.5 animate-pulse rounded-full bg-cyan-400" />
+                <span className="text-[10px] font-medium uppercase tracking-wider text-cyan-300">
+                  Sandbox
+                </span>
+              </div>
+            ) : isRunning ? (
               <div className="flex items-center gap-1.5 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2 py-0.5">
                 <div className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" />
                 <span className="text-[10px] font-medium uppercase tracking-wider text-emerald-500">
@@ -201,54 +294,67 @@ export default function PreviewPanel({ onSendVisualPrompt }: PreviewPanelProps) 
                 </span>
               </div>
             )}
-            {port ? (
+            {!useBrowserPreview && port ? (
               <span className="font-mono text-[10px] text-gray-500">localhost:{port}</span>
             ) : null}
           </div>
         </div>
 
         <div className="flex items-center gap-1">
-          <Button
-            variant="ghost"
-            size="sm"
-            className={cn(
-              "h-7 px-2 text-[10px] gap-1.5 transition-colors",
-              visualEditEnabled
-                ? "bg-cyan-500/20 text-cyan-200 hover:bg-cyan-500/30"
-                : "text-slate-500 hover:bg-slate-800/60 hover:text-slate-300"
-            )}
-            onClick={() =>
-              setVisualEditEnabled((prev) => {
-                const next = !prev;
-                if (!next) {
-                  setSelectedElement(null);
+          {!useBrowserPreview ? (
+            <>
+              <Button
+                variant="ghost"
+                size="sm"
+                className={cn(
+                  "h-7 px-2 text-[10px] gap-1.5 transition-colors",
+                  visualEditEnabled
+                    ? "bg-cyan-500/20 text-cyan-200 hover:bg-cyan-500/30"
+                    : "text-slate-500 hover:bg-slate-800/60 hover:text-slate-300"
+                )}
+                onClick={() =>
+                  setVisualEditEnabled((prev) => {
+                    const next = !prev;
+                    if (!next) {
+                      setSelectedElement(null);
+                    }
+                    return next;
+                  })
                 }
-                return next;
-              })
-            }
-          >
-            <MousePointer2 className="h-3 w-3" />
-            Visual Edit
-          </Button>
+              >
+                <MousePointer2 className="h-3 w-3" />
+                Visual Edit
+              </Button>
 
-          <Button
-            variant="ghost"
-            size="sm"
-            className={cn(
-              "h-7 px-2 text-[10px] gap-1.5 transition-colors",
-              showLogs
-                ? "bg-cyan-500/10 text-cyan-300 hover:bg-cyan-500/20 hover:text-cyan-200"
-                : "text-slate-500 hover:bg-slate-800/60 hover:text-slate-300"
-            )}
-            onClick={() => setShowLogs((prev) => !prev)}
-          >
-            <TerminalIcon className="h-3 w-3" />
-            Logs
-          </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className={cn(
+                  "h-7 px-2 text-[10px] gap-1.5 transition-colors",
+                  showLogs
+                    ? "bg-cyan-500/10 text-cyan-300 hover:bg-cyan-500/20 hover:text-cyan-200"
+                    : "text-slate-500 hover:bg-slate-800/60 hover:text-slate-300"
+                )}
+                onClick={() => setShowLogs((prev) => !prev)}
+              >
+                <TerminalIcon className="h-3 w-3" />
+                Logs
+              </Button>
 
-          <div className="mx-1 h-3 w-[1px] bg-white/10" />
+              <div className="mx-1 h-3 w-[1px] bg-white/10" />
+            </>
+          ) : null}
 
-          {isRunning ? (
+          {useBrowserPreview ? (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 text-slate-500 hover:bg-slate-800/60 hover:text-slate-300"
+              onClick={() => setSandboxRefreshKey((key) => key + 1)}
+            >
+              <RefreshCw className="h-3.5 w-3.5" />
+            </Button>
+          ) : isRunning ? (
             <>
               <Button
                 variant="ghost"
@@ -305,7 +411,47 @@ export default function PreviewPanel({ onSendVisualPrompt }: PreviewPanelProps) 
       </div>
 
       <div className="relative flex min-h-0 flex-1 flex-col">
-        {previewUrl && isRunning ? (
+        {useBrowserPreview ? (
+          sandpackProject.fileCount > 0 ? (
+            <div className="h-full w-full overflow-hidden bg-[#0a0a0a]">
+              <SandpackProvider
+                key={sandboxRefreshKey}
+                template={sandpackProject.template}
+                files={sandpackProject.files}
+                customSetup={{
+                  dependencies: sandpackProject.dependencies,
+                  devDependencies: sandpackProject.devDependencies,
+                  entry: sandpackProject.entry,
+                }}
+                options={{
+                  activeFile: sandpackProject.activeFile,
+                  autoReload: true,
+                }}
+              >
+                <SandpackPreview
+                  showNavigator={false}
+                  showOpenInCodeSandbox={false}
+                  showRefreshButton
+                  showRestartButton
+                  style={{ height: "100%" }}
+                  className="h-full"
+                />
+              </SandpackProvider>
+            </div>
+          ) : (
+            <div className="flex flex-1 flex-col items-center justify-center bg-[#0a0a0a] p-6 text-center">
+              <div className="max-w-md animate-in fade-in zoom-in-95 duration-300">
+                <div className="mb-4 inline-flex h-12 w-12 items-center justify-center rounded-full bg-slate-500/10">
+                  <AlertCircle className="h-6 w-6 text-slate-400" />
+                </div>
+                <h3 className="mb-2 font-medium text-white">Waiting For Generated Files</h3>
+                <p className="text-sm leading-relaxed text-gray-500">
+                  Send a prompt to generate files. They will render here in a browser sandbox.
+                </p>
+              </div>
+            </div>
+          )
+        ) : previewUrl && isRunning ? (
           <iframe
             ref={iframeRef}
             src={previewUrl}
@@ -385,7 +531,7 @@ export default function PreviewPanel({ onSendVisualPrompt }: PreviewPanelProps) 
           </div>
         )}
 
-        {visualEditEnabled ? (
+        {!useBrowserPreview && visualEditEnabled ? (
           <VisualEditOverlay
             key={selectedElement?.selector || "visual-overlay"}
             enabled={visualEditEnabled}
@@ -399,7 +545,7 @@ export default function PreviewPanel({ onSendVisualPrompt }: PreviewPanelProps) 
           />
         ) : null}
 
-        {showLogs ? (
+        {!useBrowserPreview && showLogs ? (
           <div className="absolute inset-x-0 bottom-0 z-20 flex h-1/2 flex-col animate-in slide-in-from-bottom border-t border-white/10 bg-slate-950/95 duration-300">
             <div className="flex shrink-0 items-center justify-between border-b border-white/10 bg-slate-900/70 px-4 py-2">
               <div className="flex items-center gap-2">

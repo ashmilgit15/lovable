@@ -8,6 +8,7 @@ DEFAULT_CORS_ORIGINS = [
     "http://127.0.0.1:5173",
     "http://localhost:3000",
 ]
+DEFAULT_CORS_ORIGIN_REGEX = r"^https://.*\.vercel\.app$"
 
 
 @dataclass(frozen=True)
@@ -43,7 +44,9 @@ def load_cors_settings() -> CORSSettings:
     if not allow_origins:
         allow_origins = DEFAULT_CORS_ORIGINS.copy()
 
-    allow_origin_regex = (os.getenv("CORS_ORIGIN_REGEX") or "").strip() or None
+    allow_origin_regex = (
+        (os.getenv("CORS_ORIGIN_REGEX") or "").strip() or DEFAULT_CORS_ORIGIN_REGEX
+    )
     allow_credentials = "*" not in allow_origins
 
     return CORSSettings(

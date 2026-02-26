@@ -32,6 +32,12 @@ interface BuilderWsMessage {
   [key: string]: unknown;
 }
 
+interface ParsedStreamFile {
+  filename: string;
+  content: string;
+  language: string;
+}
+
 function sanitizeAssistantMessage(content: string): string {
   let cleaned = (content || "").trim();
   if (!cleaned) return "";
@@ -47,6 +53,42 @@ function sanitizeAssistantMessage(content: string): string {
   cleaned = cleaned.replace(/^\s*EXPLANATION:\s*/i, "");
   cleaned = cleaned.replace(/\n{3,}/g, "\n\n");
   return cleaned.trim();
+}
+
+/**
+ * Incrementally parse completed FILE blocks from the streaming buffer.
+ * Returns fully closed FILE blocks and the remaining unparsed buffer.
+ * This enables applying files as soon as their code block closes
+ * (like Bolt/v0) instead of waiting for the entire response.
+ */
+function parseIncrementalFiles(
+  buffer: string,
+  alreadyApplied: Set<string>
+): { files: ParsedStreamFile[]; remaining: string } {
+  const files: ParsedStreamFile[] = [];
+
+  // Pattern: FILE: path\n```lang\ncontent\n```
+  const pattern = /FILE:\s*(.+?)\n```(\w*)\n(.*?)```/gs;
+  let lastMatchEnd = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = pattern.exec(buffer)) !== null) {
+    const filename = match[1].trim();
+    const lang = match[2].trim() || "tsx";
+    const content = match[3].trim();
+    lastMatchEnd = match.index + match[0].length;
+
+    // Create a unique key to avoid re-applying the same file block
+    const key = `${filename}::${content.length}`;
+    if (!alreadyApplied.has(key)) {
+      alreadyApplied.add(key);
+      files.push({ filename, content, language: lang });
+    }
+  }
+
+  // Return remaining buffer after last complete match for future parsing
+  const remaining = lastMatchEnd > 0 ? buffer.slice(lastMatchEnd) : buffer;
+  return { files, remaining };
 }
 
 function buildEditedFilesSummary(
@@ -71,6 +113,12 @@ export default function Builder() {
   const store = useBuilderStore();
   const queryClient = useQueryClient();
   const projectErrorHandledRef = useRef<string | null>(null);
+
+  // Refs for incremental stream parsing
+  const streamBufferRef = useRef<string>("");
+  const appliedFilesRef = useRef<Set<string>>(new Set());
+  const streamFileCountRef = useRef<number>(0);
+
   const prefillInput = useMemo(() => {
     if (!projectId) return null;
     const promptFromSession = sessionStorage.getItem(
@@ -187,10 +235,10 @@ export default function Builder() {
       const normalizedMessage =
         message.role === "assistant"
           ? {
-              ...message,
-              content:
-                sanitizeAssistantMessage(message.content) || "Generation complete.",
-            }
+            ...message,
+            content:
+              sanitizeAssistantMessage(message.content) || "Generation complete.",
+          }
           : message;
       state.addMessage(normalizedMessage);
     },
@@ -231,6 +279,41 @@ export default function Builder() {
     }
 
     if (msg.type === "token") {
+      const token = String(msg.content || "");
+      if (token) {
+        // Append to visible stream content for live typing effect
+        s.appendStreamContent(token);
+
+        // Accumulate in buffer and incrementally parse completed FILE blocks
+        streamBufferRef.current += token;
+        const { files, remaining } = parseIncrementalFiles(
+          streamBufferRef.current,
+          appliedFilesRef.current
+        );
+        streamBufferRef.current = remaining;
+
+        if (files.length > 0) {
+          // Apply files immediately as they complete — no waiting
+          s.applyFileUpdates(files);
+          streamFileCountRef.current += files.length;
+
+          // Show file progress indicators for each incrementally applied file
+          for (const [offset, file] of files.entries()) {
+            const fileIndex = streamFileCountRef.current - files.length + offset + 1;
+            s.setFileProgress({
+              filename: file.filename,
+              status: "edited",
+              index: fileIndex,
+              total: 0, // unknown total during streaming
+            });
+          }
+
+          // Set first streamed file as active for immediate preview
+          if (streamFileCountRef.current === files.length) {
+            s.setActiveFile(files[0].filename);
+          }
+        }
+      }
       return;
     }
 
@@ -241,16 +324,16 @@ export default function Builder() {
     if (msg.type === "todo_state") {
       const state = (msg.state || null) as
         | {
-            project_id: string;
-            objective: string;
-            tasks: Array<{
-              id: string;
-              title: string;
-              status: "pending" | "in_progress" | "done";
-            }>;
-            project_complete: boolean;
-            updated_at: string;
-          }
+          project_id: string;
+          objective: string;
+          tasks: Array<{
+            id: string;
+            title: string;
+            status: "pending" | "in_progress" | "done";
+          }>;
+          project_complete: boolean;
+          updated_at: string;
+        }
         | null;
       s.setTodoPlan(state);
       return;
@@ -451,6 +534,11 @@ export default function Builder() {
     store.clearGenerationProgress();
     store.clearFileProgress();
 
+    // Reset incremental parsing state for new generation
+    streamBufferRef.current = "";
+    appliedFilesRef.current = new Set();
+    streamFileCountRef.current = 0;
+
     const sent = send({
       message,
       model: store.selectedModel || undefined,
@@ -640,11 +728,10 @@ export default function Builder() {
                 <Button
                   size="sm"
                   variant="ghost"
-                  className={`h-7 px-3 text-xs ${
-                    workspaceView === "preview"
-                      ? "bg-cyan-500/15 text-cyan-200"
-                      : "text-slate-400 hover:bg-slate-800/70 hover:text-slate-200"
-                  }`}
+                  className={`h-7 px-3 text-xs ${workspaceView === "preview"
+                    ? "bg-cyan-500/15 text-cyan-200"
+                    : "text-slate-400 hover:bg-slate-800/70 hover:text-slate-200"
+                    }`}
                   onClick={() => setWorkspaceView("preview")}
                 >
                   Preview
@@ -652,11 +739,10 @@ export default function Builder() {
                 <Button
                   size="sm"
                   variant="ghost"
-                  className={`h-7 px-3 text-xs ${
-                    workspaceView === "code"
-                      ? "bg-cyan-500/15 text-cyan-200"
-                      : "text-slate-400 hover:bg-slate-800/70 hover:text-slate-200"
-                  }`}
+                  className={`h-7 px-3 text-xs ${workspaceView === "code"
+                    ? "bg-cyan-500/15 text-cyan-200"
+                    : "text-slate-400 hover:bg-slate-800/70 hover:text-slate-200"
+                    }`}
                   onClick={() => setWorkspaceView("code")}
                 >
                   Code
@@ -668,11 +754,10 @@ export default function Builder() {
                   <Button
                     size="sm"
                     variant="ghost"
-                    className={`h-7 px-2 text-xs ${
-                      store.activeTab === "preview"
-                        ? "bg-cyan-500/15 text-cyan-200"
-                        : "text-slate-400 hover:bg-slate-800/70 hover:text-slate-200"
-                    }`}
+                    className={`h-7 px-2 text-xs ${store.activeTab === "preview"
+                      ? "bg-cyan-500/15 text-cyan-200"
+                      : "text-slate-400 hover:bg-slate-800/70 hover:text-slate-200"
+                      }`}
                     onClick={() => store.setActiveTab("preview")}
                   >
                     Live
@@ -680,11 +765,10 @@ export default function Builder() {
                   <Button
                     size="sm"
                     variant="ghost"
-                    className={`h-7 px-2 text-xs ${
-                      store.activeTab === "terminal"
-                        ? "bg-cyan-500/15 text-cyan-200"
-                        : "text-slate-400 hover:bg-slate-800/70 hover:text-slate-200"
-                    }`}
+                    className={`h-7 px-2 text-xs ${store.activeTab === "terminal"
+                      ? "bg-cyan-500/15 text-cyan-200"
+                      : "text-slate-400 hover:bg-slate-800/70 hover:text-slate-200"
+                      }`}
                     onClick={() => store.setActiveTab("terminal")}
                   >
                     Terminal
