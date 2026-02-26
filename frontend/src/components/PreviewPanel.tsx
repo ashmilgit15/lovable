@@ -395,7 +395,14 @@ function buildSandpackProject(files: Record<string, FileData>) {
 
   for (const file of Object.values(files)) {
     if (!file?.filename) continue;
-    sandpackFiles[normalizeSandpackPath(file.filename)] = file.content ?? "";
+    const path = normalizeSandpackPath(file.filename);
+
+    // Ignore build tooling config files in Sandpack to force legacy client bundler instead of heavy WebContainers Node
+    // This fixes "Failed to get shell by ID" crashes inside the preview
+    if (/^\/(?:vite|tailwind|postcss|eslint)\.config\.(?:js|ts|mjs|cjs)$/.test(path)) continue;
+    if (path === "/tsconfig.json" || path === "/tsconfig.node.json" || path === "/tsconfig.app.json") continue;
+
+    sandpackFiles[path] = file.content ?? "";
   }
 
   const entryCandidates = [
@@ -802,9 +809,11 @@ export default function PreviewPanel({ onSendVisualPrompt }: PreviewPanelProps) 
       <div className="relative flex min-h-0 flex-1 flex-col">
         {useBrowserPreview ? (
           sandpackProject.fileCount > 0 ? (
-            <div className="flex min-h-0 flex-1 overflow-hidden bg-[#0a0a0a]">
+            <div className="min-h-0 h-full w-full overflow-hidden bg-[#0a0a0a]">
               <SandpackProvider
                 key={`${activeProjectId ?? "project"}:${sandboxRefreshKey}:${sandpackProject.template}:${sandpackProject.environment}`}
+                className="h-full w-full min-h-0"
+                style={{ height: "100%" }}
                 template={sandpackProject.template}
                 files={sandpackProject.files}
                 customSetup={{
