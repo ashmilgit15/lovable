@@ -93,6 +93,147 @@ function parseSandpackDeps(
   }
 }
 
+function parsePackageJson(rawPackageJson: string | undefined): Record<string, unknown> | null {
+  if (!rawPackageJson) return null;
+  try {
+    const parsed = JSON.parse(rawPackageJson);
+    return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
+function toStringDeps(value: unknown): Record<string, string> {
+  if (!value || typeof value !== "object") return {};
+  const out: Record<string, string> = {};
+  for (const [name, version] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof version === "string" && version.trim()) {
+      out[name] = version;
+    }
+  }
+  return out;
+}
+
+function hasViteTooling(files: Record<string, string>, pkg: Record<string, unknown> | null): boolean {
+  const hasViteConfig = Object.keys(files).some((path) =>
+    /^\/vite\.config\.(?:ts|js|mts|mjs|cts|cjs)$/i.test(path)
+  );
+  if (hasViteConfig) return true;
+  if (!pkg) return false;
+
+  const dependencies = toStringDeps(pkg.dependencies);
+  const devDependencies = toStringDeps(pkg.devDependencies);
+  if (dependencies.vite || devDependencies.vite) return true;
+
+  const scripts = pkg.scripts && typeof pkg.scripts === "object"
+    ? (pkg.scripts as Record<string, unknown>)
+    : {};
+  const scriptValues = Object.values(scripts)
+    .filter((value): value is string => typeof value === "string")
+    .join(" ");
+
+  return /\bvite\b/i.test(scriptValues);
+}
+
+function normalizePackageJsonForSandbox(
+  sandpackFiles: Record<string, string>,
+  entry: string | undefined
+): {
+  dependencies: Record<string, string>;
+  hasPackageJson: boolean;
+  usesVite: boolean;
+} {
+  const rawPackageJson = sandpackFiles["/package.json"];
+  const parsed = parsePackageJson(rawPackageJson);
+  if (!parsed) {
+    return {
+      dependencies: parseSandpackDeps(rawPackageJson),
+      hasPackageJson: false,
+      usesVite: false,
+    };
+  }
+
+  const dependencies = toStringDeps(parsed.dependencies);
+  const devDependencies = toStringDeps(parsed.devDependencies);
+  const usesVite = hasViteTooling(sandpackFiles, parsed);
+
+  const normalized: Record<string, unknown> = {
+    ...parsed,
+    dependencies: { ...dependencies },
+  };
+
+  if (usesVite) {
+    const toolingAllowlist = new Set([
+      "vite",
+      "esbuild",
+      "esbuild-wasm",
+      "@vitejs/plugin-react",
+      "@vitejs/plugin-react-swc",
+      "@tailwindcss/vite",
+      "tailwindcss",
+      "postcss",
+      "autoprefixer",
+      "typescript",
+    ]);
+
+    for (const [name, version] of Object.entries(devDependencies)) {
+      if (toolingAllowlist.has(name)) {
+        (normalized.dependencies as Record<string, string>)[name] = version;
+      }
+    }
+
+    if (!(normalized.dependencies as Record<string, string>).vite) {
+      (normalized.dependencies as Record<string, string>).vite = "^7.3.1";
+    }
+    if (!(normalized.dependencies as Record<string, string>)["esbuild-wasm"]) {
+      (normalized.dependencies as Record<string, string>)["esbuild-wasm"] = "^0.25.0";
+    }
+
+    const scripts =
+      parsed.scripts && typeof parsed.scripts === "object"
+        ? { ...(parsed.scripts as Record<string, unknown>) }
+        : {};
+    const startScript = typeof scripts.start === "string" ? scripts.start : "";
+    if (!/\bvite\b/i.test(startScript)) {
+      scripts.start = "vite --host 0.0.0.0 --port 3000";
+    }
+    normalized.scripts = scripts;
+  }
+
+  normalized.main =
+    entry ||
+    (typeof parsed.main === "string" && parsed.main.trim() ? parsed.main : "/src/main.tsx");
+
+  // Sandpack installs runtime deps only; keeping dev deps often causes confusion for Vite projects.
+  delete normalized.devDependencies;
+
+  sandpackFiles["/package.json"] = JSON.stringify(normalized, null, 2);
+  return {
+    dependencies: normalized.dependencies as Record<string, string>,
+    hasPackageJson: true,
+    usesVite,
+  };
+}
+
+function pickFallbackCssFile(availableFiles: Record<string, string>): string | null {
+  const preferred = [
+    "/src/index.css",
+    "/src/App.css",
+    "/index.css",
+    "/styles.css",
+  ];
+  for (const candidate of preferred) {
+    if (Object.prototype.hasOwnProperty.call(availableFiles, candidate)) {
+      return candidate;
+    }
+  }
+
+  const firstCss = Object.keys(availableFiles).find(
+    (path) => path.endsWith(".css") && !path.includes("/node_modules/")
+  );
+  return firstCss || null;
+}
+
 function normalizeBuiltIndexHtmlForSandbox(
   indexHtml: string,
   entry: string | undefined,
@@ -108,10 +249,18 @@ function normalizeBuiltIndexHtmlForSandbox(
     return Object.prototype.hasOwnProperty.call(availableFiles, normalizedPath);
   };
 
+  const fallbackCssFile = pickFallbackCssFile(availableFiles);
+
   let normalized = indexHtml;
   normalized = normalized.replace(
-    /<link[^>]+href=["'](\/assets\/[^"']+\.css)["'][^>]*>\s*/gi,
-    (fullMatch, cssPath: string) => (hasFile(cssPath) ? fullMatch : "")
+    /<link[^>]+href=["']([^"']+\.css)["'][^>]*>\s*/gi,
+    (fullMatch, cssPath: string) => {
+      if (hasFile(cssPath)) return fullMatch;
+      if (fallbackCssFile) {
+        return fullMatch.replace(cssPath, fallbackCssFile);
+      }
+      return fullMatch;
+    }
   );
 
   const scriptPattern =
@@ -126,15 +275,19 @@ function normalizeBuiltIndexHtmlForSandbox(
       (fullMatch, scriptPath: string) =>
         hasFile(scriptPath)
           ? fullMatch
-          : `<script type="module" src="${previewEntry}"></script>`
+          : entry
+            ? `<script type="module" src="${previewEntry}"></script>`
+            : fullMatch
     );
   } else if (/<\/body>/i.test(normalized)) {
-    normalized = normalized.replace(
-      /<\/body>/i,
-      `  <script type="module" src="${previewEntry}"></script>\n</body>`
-    );
+    if (entry) {
+      normalized = normalized.replace(
+        /<\/body>/i,
+        `  <script type="module" src="${previewEntry}"></script>\n</body>`
+      );
+    }
   } else if (normalized.includes('<script type="module" src="/src/main.tsx">')) {
-    normalized = normalized.replace('<script type="module" src="/src/main.tsx">', `<script type="module" src="${previewEntry}">`)
+    normalized = normalized.replace('<script type="module" src="/src/main.tsx">', `<script type="module" src="${previewEntry}">`);
   }
 
   return normalized;
@@ -147,9 +300,6 @@ function buildSandpackProject(files: Record<string, FileData>) {
     if (!file?.filename) continue;
     sandpackFiles[normalizeSandpackPath(file.filename)] = file.content ?? "";
   }
-
-  const packageJsonRaw = sandpackFiles["/package.json"];
-  const dependencies = parseSandpackDeps(packageJsonRaw);
 
   const entryCandidates = [
     "/src/main.tsx",
@@ -164,6 +314,11 @@ function buildSandpackProject(files: Record<string, FileData>) {
   const entry = entryCandidates.find((candidate) => sandpackFiles[candidate]);
   const activeFile = entry || Object.keys(sandpackFiles)[0] || "/src/main.tsx";
 
+  const { dependencies, hasPackageJson, usesVite } = normalizePackageJsonForSandbox(
+    sandpackFiles,
+    entry
+  );
+
   if (sandpackFiles["/index.html"]) {
     sandpackFiles["/index.html"] = normalizeBuiltIndexHtmlForSandbox(
       sandpackFiles["/index.html"],
@@ -175,14 +330,27 @@ function buildSandpackProject(files: Record<string, FileData>) {
   const hasTypescript = Object.keys(sandpackFiles).some(
     (path) => path.endsWith(".ts") || path.endsWith(".tsx")
   );
+  const template = usesVite
+    ? hasTypescript
+      ? "vite-react-ts"
+      : "vite-react"
+    : hasTypescript
+      ? "react-ts"
+      : "react";
+  const environment = usesVite
+    ? "node"
+    : hasTypescript
+      ? "create-react-app-typescript"
+      : "create-react-app";
 
   return {
     files: sandpackFiles,
-    dependencies,
+    dependencies: hasPackageJson ? {} : dependencies,
     entry,
+    environment,
     activeFile,
     fileCount: Object.keys(sandpackFiles).length,
-    template: hasTypescript ? "react-ts" : "react",
+    template,
   } as const;
 }
 
@@ -534,6 +702,7 @@ export default function PreviewPanel({ onSendVisualPrompt }: PreviewPanelProps) 
                 customSetup={{
                   dependencies: sandpackProject.dependencies,
                   entry: sandpackProject.entry,
+                  environment: sandpackProject.environment,
                 }}
                 options={{
                   activeFile: sandpackProject.activeFile,
