@@ -373,6 +373,19 @@
   }
 
   /* Ensure hosted Sandpack preview always occupies the full preview pane. */
+  .forge-sandpack-host {
+    width: 100% !important;
+    height: 100% !important;
+    min-width: 0 !important;
+    min-height: 0 !important;
+    display: flex !important;
+    flex-direction: column !important;
+    overflow: hidden !important;
+  }
+
+  .forge-sandpack-host .sp-wrapper,
+  .forge-sandpack-host .sp-layout,
+  .forge-sandpack-host .sp-stack,
   .forge-sandpack-preview,
   .forge-sandpack-preview .sp-stack,
   .forge-sandpack-preview .sp-preview,
@@ -383,6 +396,8 @@
     min-height: 0 !important;
   }
 
+  .forge-sandpack-host .sp-layout,
+  .forge-sandpack-host .sp-stack,
   .forge-sandpack-preview .sp-preview-container,
   .forge-sandpack-preview .sp-preview-iframe {
     flex: 1 1 auto !important;

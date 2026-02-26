@@ -42,8 +42,66 @@ interface BridgeMessage {
 }
 
 function normalizeSandpackPath(filename: string): string {
-  const normalized = filename.replace(/\\/g, "/");
-  return normalized.startsWith("/") ? normalized : `/${normalized}`;
+  const normalized = filename.replace(/\\/g, "/").trim();
+  if (!normalized) return "/";
+
+  let pathOnly = normalized.split("#")[0] || normalized;
+  pathOnly = pathOnly.split("?")[0] || pathOnly;
+
+  // Convert absolute URLs to their pathname so local mirrored files can match.
+  if (/^https?:\/\//i.test(pathOnly)) {
+    try {
+      pathOnly = new URL(pathOnly).pathname || "/";
+    } catch {
+      // Keep the original value if URL parsing fails.
+    }
+  }
+
+  const prefixed = pathOnly.startsWith("/") ? pathOnly : `/${pathOnly}`;
+  const compacted = prefixed.replace(/\/{2,}/g, "/");
+  const segments: string[] = [];
+
+  for (const segment of compacted.split("/")) {
+    if (!segment || segment === ".") continue;
+    if (segment === "..") {
+      segments.pop();
+      continue;
+    }
+    segments.push(segment);
+  }
+
+  return `/${segments.join("/")}`;
+}
+
+function dirname(path: string): string {
+  const normalized = normalizeSandpackPath(path);
+  const lastSlash = normalized.lastIndexOf("/");
+  if (lastSlash <= 0) return "/";
+  return normalized.slice(0, lastSlash);
+}
+
+function resolveSandpackAssetPath(
+  reference: string,
+  fromFile = "/index.html"
+): string | null {
+  const trimmed = reference.trim();
+  if (!trimmed) return null;
+  if (/^(data:|blob:|javascript:|mailto:|tel:)/i.test(trimmed)) return null;
+  if (/^\/\//.test(trimmed)) return null;
+
+  if (/^https?:\/\//i.test(trimmed)) {
+    try {
+      return normalizeSandpackPath(new URL(trimmed).pathname);
+    } catch {
+      return null;
+    }
+  }
+
+  if (trimmed.startsWith("/")) {
+    return normalizeSandpackPath(trimmed);
+  }
+
+  return normalizeSandpackPath(`${dirname(fromFile)}/${trimmed}`);
 }
 
 function parseSandpackDeps(
@@ -164,12 +222,20 @@ function extractAssetRefs(indexHtml: string): { js: string[]; css: string[] } {
 
 function hasCompleteBuiltAssetBundle(
   indexHtml: string,
-  availableFiles: Record<string, string>
+  availableFiles: Record<string, string>,
+  htmlPath: string
 ): boolean {
   const refs = extractAssetRefs(indexHtml);
   if (refs.js.length === 0) return false;
-  const jsPresent = refs.js.every((path) => hasFile(availableFiles, path));
-  const cssPresent = refs.css.every((path) => hasFile(availableFiles, path));
+
+  const hasLocalOrExternalAsset = (reference: string) => {
+    const resolved = resolveSandpackAssetPath(reference, htmlPath);
+    if (!resolved) return true;
+    return hasFile(availableFiles, resolved);
+  };
+
+  const jsPresent = refs.js.every(hasLocalOrExternalAsset);
+  const cssPresent = refs.css.every(hasLocalOrExternalAsset);
   return jsPresent && cssPresent;
 }
 
@@ -240,7 +306,8 @@ function normalizeIndexHtmlForRuntime(
   entry: string,
   availableFiles: Record<string, string>,
   cssPath: string | null,
-  includeTailwindCdn: boolean
+  includeTailwindCdn: boolean,
+  sourceHtmlPath = "/index.html"
 ): string {
   let normalized = indexHtml || createDefaultRuntimeIndexHtml(entry);
 
@@ -251,15 +318,27 @@ function normalizeIndexHtmlForRuntime(
     );
   }
 
-  const hasFile = (path: string) => {
-    const normalizedPath = normalizeSandpackPath(path);
-    return Object.prototype.hasOwnProperty.call(availableFiles, normalizedPath);
+  const hasResolvedFile = (resolvedPath: string | null) => {
+    if (!resolvedPath) return false;
+    return Object.prototype.hasOwnProperty.call(availableFiles, resolvedPath);
   };
 
   normalized = normalized.replace(
     /<link[^>]+href=["']([^"']+\.css)["'][^>]*>\s*/gi,
     (fullMatch, existingCssHref: string) => {
-      if (hasFile(existingCssHref)) return fullMatch;
+      const resolvedCssHref = resolveSandpackAssetPath(
+        existingCssHref,
+        sourceHtmlPath
+      );
+      if (hasResolvedFile(resolvedCssHref)) {
+        return resolvedCssHref
+          ? fullMatch.replace(existingCssHref, resolvedCssHref)
+          : fullMatch;
+      }
+      if (!resolvedCssHref) {
+        // Keep external stylesheets untouched.
+        return fullMatch;
+      }
       if (cssPath) {
         return fullMatch.replace(existingCssHref, cssPath);
       }
@@ -294,7 +373,22 @@ function normalizeIndexHtmlForRuntime(
   if (scriptPattern.test(normalized)) {
     normalized = normalized.replace(
       scriptPattern,
-      (fullMatch, scriptPath: string) => (hasFile(scriptPath) ? fullMatch : `<script type="module" src="${entry}"></script>`)
+      (fullMatch, scriptPath: string) => {
+        const resolvedScriptPath = resolveSandpackAssetPath(
+          scriptPath,
+          sourceHtmlPath
+        );
+        if (hasResolvedFile(resolvedScriptPath)) {
+          return resolvedScriptPath
+            ? fullMatch.replace(scriptPath, resolvedScriptPath)
+            : fullMatch;
+        }
+        if (!resolvedScriptPath) {
+          // Keep external scripts untouched.
+          return fullMatch;
+        }
+        return `<script type="module" src="${entry}"></script>`;
+      }
     );
   } else if (/<\/body>/i.test(normalized)) {
     normalized = normalized.replace(
@@ -422,17 +516,25 @@ function buildSandpackProject(files: Record<string, FileData>) {
   const defaultEntry = hasTypescript ? "/src/main.tsx" : "/src/main.jsx";
   const effectiveEntry = entry || defaultEntry;
 
-  const indexHtml = sandpackFiles["/index.html"] || "";
+  const htmlEntryCandidates = [
+    "/index.html",
+    "/dist/index.html",
+    "/build/index.html",
+    "/out/index.html",
+  ];
+  const htmlEntry =
+    htmlEntryCandidates.find((candidate) => sandpackFiles[candidate]) || "/index.html";
+  const indexHtml = sandpackFiles[htmlEntry] || "";
   const hasBuiltBundle = Boolean(indexHtml) &&
-    hasCompleteBuiltAssetBundle(indexHtml, sandpackFiles);
+    hasCompleteBuiltAssetBundle(indexHtml, sandpackFiles, htmlEntry);
 
   if (hasBuiltBundle) {
     return {
       files: sandpackFiles,
       dependencies: {},
-      entry: "/index.html",
+      entry: htmlEntry,
       environment: "static" as const,
-      activeFile: "/index.html",
+      activeFile: htmlEntry,
       fileCount: Object.keys(sandpackFiles).length,
       template: "static" as const,
     };
@@ -450,7 +552,8 @@ function buildSandpackProject(files: Record<string, FileData>) {
     effectiveEntry,
     sandpackFiles,
     cssSupport.cssPath,
-    cssSupport.includeTailwindCdn
+    cssSupport.includeTailwindCdn,
+    htmlEntry
   );
 
   const activeFile = entry || Object.keys(sandpackFiles)[0] || effectiveEntry;
@@ -812,8 +915,15 @@ export default function PreviewPanel({ onSendVisualPrompt }: PreviewPanelProps) 
             <div className="min-h-0 h-full w-full overflow-hidden bg-[#0a0a0a]">
               <SandpackProvider
                 key={`${activeProjectId ?? "project"}:${sandboxRefreshKey}:${sandpackProject.template}:${sandpackProject.environment}`}
-                className="h-full w-full min-h-0"
-                style={{ height: "100%" }}
+                className="forge-sandpack-host"
+                style={{
+                  width: "100%",
+                  height: "100%",
+                  minHeight: 0,
+                  minWidth: 0,
+                  display: "flex",
+                  flexDirection: "column",
+                }}
                 template={sandpackProject.template}
                 files={sandpackProject.files}
                 customSetup={{
@@ -831,7 +941,7 @@ export default function PreviewPanel({ onSendVisualPrompt }: PreviewPanelProps) 
                   showOpenInCodeSandbox={false}
                   showRefreshButton
                   showRestartButton
-                  style={{ height: "100%" }}
+                  style={{ width: "100%", height: "100%" }}
                   className="forge-sandpack-preview flex min-h-0 flex-1 [&_.sp-stack]:min-h-0 [&_.sp-stack]:h-full [&_.sp-stack]:w-full [&_.sp-preview]:min-h-0 [&_.sp-preview]:h-full [&_.sp-preview]:w-full [&_.sp-preview-container]:min-h-0 [&_.sp-preview-container]:h-full [&_.sp-preview-container]:w-full [&_.sp-preview-container]:flex-1 [&_.sp-preview-iframe]:block [&_.sp-preview-iframe]:min-h-0 [&_.sp-preview-iframe]:h-full [&_.sp-preview-iframe]:w-full [&_.sp-preview-iframe]:flex-1 [&_iframe]:block [&_iframe]:h-full [&_iframe]:w-full"
                 />
               </SandpackProvider>
