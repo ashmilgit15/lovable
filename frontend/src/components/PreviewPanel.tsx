@@ -406,18 +406,30 @@ function buildRuntimeCssSupport(
     return { cssPath, includeTailwindCdn: false, inlineTailwindCss: null };
   }
 
-  // Use the browser JIT compiler so @tailwind/@apply rules still render in hosted preview.
-  // Also map Tailwind v4's @import syntax to v3 directives for broader compatibility.
-  const browserTailwindCss = cssContent
+  // Tailwind runtime input (browser compiler):
+  // - normalize v4 @import syntax to explicit directives
+  // - remove @apply to avoid runtime compile stops on custom tokens
+  let browserTailwindCss = cssContent
     .replace(
       /@import\s+["']tailwindcss["'];?\s*/gi,
       "@tailwind base;\n@tailwind components;\n@tailwind utilities;\n"
     )
-    .replace(/@custom-variant\s+[^\n]*\n?/gi, "")
-    .replace(/@theme\s*\{[\s\S]*?\}\s*/gi, "");
+    .replace(/@apply\s+[^;]+;/gi, "");
+  if (!/@tailwind\s+(?:base|components|utilities)\s*;/i.test(browserTailwindCss)) {
+    browserTailwindCss = `@tailwind base;\n@tailwind components;\n@tailwind utilities;\n${browserTailwindCss}`;
+  }
 
-  const generatedPath = "/__sandbox_preview_tailwind.css";
-  sandpackFiles[generatedPath] = browserTailwindCss;
+  // Plain CSS fallback keeps non-tailwind declarations (keyframes, custom rules)
+  // while stripping directives that require a build step.
+  const plainCssFallback = cssContent
+    .replace(/@import\s+["']tailwindcss["'];?\s*/gi, "")
+    .replace(/@tailwind\s+(?:base|components|utilities)\s*;\s*/gi, "")
+    .replace(/@custom-variant\s+[^\n]*\n?/gi, "")
+    .replace(/@theme\s*\{[\s\S]*?\}\s*/gi, "")
+    .replace(/@apply\s+[^;]+;/gi, "");
+
+  const generatedPath = "/__sandbox_preview.css";
+  sandpackFiles[generatedPath] = plainCssFallback;
   return {
     cssPath: generatedPath,
     includeTailwindCdn: true,
@@ -460,9 +472,6 @@ function normalizeIndexHtmlForRuntime(
           availableFiles,
           resolvedCssHref || ""
         );
-        if (inlineTailwindCss && cssPath && existingPath === cssPath) {
-          return "";
-        }
         return resolvedCssHref
           ? fullMatch.replace(existingCssHref, existingPath || resolvedCssHref)
           : fullMatch;
@@ -470,9 +479,6 @@ function normalizeIndexHtmlForRuntime(
       if (!resolvedCssHref) {
         // Keep external stylesheets untouched.
         return fullMatch;
-      }
-      if (inlineTailwindCss) {
-        return "";
       }
       if (cssPath) {
         return fullMatch.replace(existingCssHref, cssPath);
@@ -501,14 +507,19 @@ function normalizeIndexHtmlForRuntime(
     }
   }
 
-  if (includeTailwindCdn && !/cdn\.tailwindcss\.com/i.test(normalized)) {
+  if (
+    includeTailwindCdn &&
+    !/cdn\.tailwindcss\.com|@tailwindcss\/browser@4/i.test(normalized)
+  ) {
+    const tailwindBrowserScript =
+      "https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4";
     if (/<\/head>/i.test(normalized)) {
       normalized = normalized.replace(
         /<\/head>/i,
-        `  <script src="https://cdn.tailwindcss.com"></script>\n</head>`
+        `  <script src="${tailwindBrowserScript}"></script>\n</head>`
       );
     } else {
-      normalized = `<head>\n  <script src="https://cdn.tailwindcss.com"></script>\n</head>\n${normalized}`;
+      normalized = `<head>\n  <script src="${tailwindBrowserScript}"></script>\n</head>\n${normalized}`;
     }
   }
 
@@ -907,7 +918,7 @@ export default function PreviewPanel({ onSendVisualPrompt }: PreviewPanelProps) 
   };
 
   return (
-    <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-transparent">
+    <div className="relative flex h-full min-h-0 w-full flex-1 flex-col overflow-hidden bg-transparent">
       <div className="panel-header flex h-[40px] shrink-0 items-center justify-between border-b border-white/10 bg-slate-950/35 px-4 py-2">
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2">
@@ -1070,10 +1081,10 @@ export default function PreviewPanel({ onSendVisualPrompt }: PreviewPanelProps) 
         </div>
       </div>
 
-      <div className="relative flex min-h-0 flex-1 flex-col">
+      <div className="relative flex h-full min-h-0 w-full flex-1 flex-col">
         {useBrowserPreview ? (
           sandpackProject.fileCount > 0 ? (
-            <div className="relative flex min-h-0 flex-1 w-full overflow-hidden bg-[#0a0a0a]">
+            <div className="relative flex h-full min-h-0 w-full flex-1 overflow-hidden bg-[#0a0a0a]">
               <SandpackProvider
                 key={`${activeProjectId ?? "project"}:${sandboxRefreshKey}:${sandpackProject.template}:${sandpackProject.environment}`}
                 className="forge-sandpack-host"

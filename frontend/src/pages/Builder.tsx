@@ -782,7 +782,7 @@ export default function Builder() {
             </div>
 
             {workspaceView === "preview" ? (
-              <div className="min-h-0 flex-1">
+              <div className="min-h-0 h-full w-full flex-1">
                 {store.activeTab === "terminal" ? (
                   projectId ? <TerminalPanel projectId={projectId} /> : null
                 ) : (
