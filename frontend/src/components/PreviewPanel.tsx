@@ -59,10 +59,8 @@ function parseSandpackDeps(
       devDependencies?: Record<string, unknown>;
     };
     const runtimeDependencies: Record<string, string> = {};
-    const sourceDependencies = {
-      ...(parsed.dependencies || {}),
-      ...(parsed.devDependencies || {}),
-    };
+    const sourceDependencies = parsed.dependencies || {};
+    const declaredDevDependencies = parsed.devDependencies || {};
     const blockedPackages = [
       /^vite$/i,
       /^esbuild$/i,
@@ -82,7 +80,9 @@ function parseSandpackDeps(
 
     const hasVite =
       typeof sourceDependencies.vite === "string" ||
-      Object.keys(sourceDependencies).some((name) => /^@vitejs\//i.test(name));
+      typeof declaredDevDependencies.vite === "string" ||
+      Object.keys(sourceDependencies).some((name) => /^@vitejs\//i.test(name)) ||
+      Object.keys(declaredDevDependencies).some((name) => /^@vitejs\//i.test(name));
     if (hasVite && !runtimeDependencies["esbuild-wasm"]) {
       runtimeDependencies["esbuild-wasm"] = "^0.25.0";
     }
@@ -166,7 +166,7 @@ function buildSandpackProject(files: Record<string, FileData>) {
     entry,
     activeFile,
     fileCount: Object.keys(sandpackFiles).length,
-    template: hasTypescript ? "vite-react-ts" : "vite-react",
+    template: hasTypescript ? "react-ts" : "react",
   } as const;
 }
 
@@ -530,7 +530,7 @@ export default function PreviewPanel({ onSendVisualPrompt }: PreviewPanelProps) 
                   showRefreshButton
                   showRestartButton
                   style={{ height: "100%" }}
-                  className="h-full"
+                  className="h-full [&_.sp-wrapper]:h-full [&_.sp-layout]:h-full [&_.sp-stack]:h-full [&_.sp-preview]:h-full [&_.sp-preview-container]:h-full"
                 />
               </SandpackProvider>
             </div>
