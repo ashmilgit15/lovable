@@ -9,7 +9,7 @@ services:
     healthCheckPath: /health
     envVars:
       - key: DATABASE_URL
-        value: postgresql://neondb_owner:npg_KeRNSPID2bi0@ep-red-base-ai4eu9g7-pooler.c-4.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require
+        sync: false
       - key: OLLAMA_BASE_URL
         value: http://127.0.0.1:11434
       - key: OLLAMA_DEFAULT_MODEL

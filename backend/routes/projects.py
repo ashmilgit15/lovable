@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import StreamingResponse
 from sqlmodel import Session, select
 from sqlalchemy import func, or_
 from pydantic import BaseModel
@@ -727,4 +727,22 @@ def export_project(
     # Schedule cleanup of the zip file after sending
     background_tasks.add_task(os.remove, zip_path)
 
-    return FileResponse(zip_path, filename=zip_filename, media_type="application/zip")
+    headers = {
+        "Content-Disposition": f'attachment; filename="{zip_filename}"',
+        "Accept-Ranges": "none",
+    }
+
+    def stream_zip():
+        with open(zip_path, "rb") as file_obj:
+            while True:
+                chunk = file_obj.read(64 * 1024)
+                if not chunk:
+                    break
+                yield chunk
+
+    return StreamingResponse(
+        stream_zip(),
+        media_type="application/zip",
+        headers=headers,
+        background=background_tasks,
+    )

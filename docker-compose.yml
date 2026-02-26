@@ -15,6 +15,7 @@ services:
     environment:
       - OLLAMA_BASE_URL=http://ollama:11434
       - OLLAMA_DEFAULT_MODEL=llama3.1
+      - ENABLE_UNTRUSTED_CODE_EXECUTION=true
     depends_on:
       - ollama
     volumes:

@@ -67,7 +67,7 @@ For external providers, set:
 
 For hosted/authenticated deployments:
 
-- `ENABLE_UNTRUSTED_CODE_EXECUTION` defaults to `false` when `CLERK_SECRET_KEY` is configured.
+- `ENABLE_UNTRUSTED_CODE_EXECUTION` defaults to `false` for all environments.
 - Set it to `true` only in trusted/sandboxed environments if you need remote terminal/devserver/typecheck execution.
 
 ## Development Prep
