@@ -30,7 +30,9 @@ Thumbs.db
 *.sqlite
 backend/data/
 backend/generated/
+generated/
 backend/.pytest_cache/
+backend/pytest-cache-files-*/
 
 # Docker
 docker-compose.override.yml

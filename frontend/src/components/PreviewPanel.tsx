@@ -56,11 +56,16 @@ function parseSandpackDeps(
   try {
     const parsed = JSON.parse(rawPackageJson) as {
       dependencies?: Record<string, unknown>;
+      devDependencies?: Record<string, unknown>;
     };
     const runtimeDependencies: Record<string, string> = {};
+    const sourceDependencies = {
+      ...(parsed.dependencies || {}),
+      ...(parsed.devDependencies || {}),
+    };
     const blockedPackages = [
       /^vite$/i,
-      /^esbuild/i,
+      /^esbuild$/i,
       /^@vitejs\//i,
       /^typescript$/i,
       /^eslint/i,
@@ -69,10 +74,17 @@ function parseSandpackDeps(
       /^autoprefixer$/i,
     ];
 
-    for (const [name, value] of Object.entries(parsed.dependencies || {})) {
+    for (const [name, value] of Object.entries(sourceDependencies)) {
       if (typeof value !== "string") continue;
       if (blockedPackages.some((pattern) => pattern.test(name))) continue;
       runtimeDependencies[name] = value;
+    }
+
+    const hasVite =
+      typeof sourceDependencies.vite === "string" ||
+      Object.keys(sourceDependencies).some((name) => /^@vitejs\//i.test(name));
+    if (hasVite && !runtimeDependencies["esbuild-wasm"]) {
+      runtimeDependencies["esbuild-wasm"] = "^0.25.0";
     }
 
     return runtimeDependencies;

@@ -29,6 +29,22 @@ const devSecurityHeaders = {
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  build: {
+    cssCodeSplit: false,
+    modulePreload: false,
+    rollupOptions: {
+      output: {
+        // Keep the primary app entrypoints stable across deploys so deep-linked pages
+        // don't break when an older HTML shell is briefly cached.
+        entryFileNames: 'assets/app.js',
+        chunkFileNames: 'assets/[name]-[hash].js',
+        assetFileNames: (assetInfo) =>
+          assetInfo.name?.endsWith('.css')
+            ? 'assets/app.css'
+            : 'assets/[name]-[hash][extname]',
+      },
+    },
+  },
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),

@@ -40,3 +40,29 @@ async def test_join_room_does_not_allow_owner_takeover_on_rejoin():
 
     assert room.owner_id == "owner-user"
     assert room.users["attacker-user"].is_owner is False
+
+
+@pytest.mark.asyncio
+async def test_join_room_ignores_spoofed_owner_id_for_existing_room():
+    manager = CollaborationManager()
+    owner_ws = _DummyWebSocket()
+    attacker_ws = _DummyWebSocket()
+
+    room = await manager.join_room(
+        project_id="project-2",
+        user_id="owner-user",
+        username="Owner",
+        websocket=owner_ws,
+    )
+    assert room.owner_id == "owner-user"
+
+    room = await manager.join_room(
+        project_id="project-2",
+        user_id="attacker-user",
+        username="Attacker",
+        websocket=attacker_ws,
+        owner_id="attacker-user",
+    )
+
+    assert room.owner_id == "owner-user"
+    assert room.users["attacker-user"].is_owner is False
