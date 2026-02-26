@@ -408,9 +408,26 @@ export default function Landing() {
             </span>
           </div>
           <p className="text-xs text-slate-500">
-            AI-powered development with deployment-ready workflows. Built with ❤️
+            Built by{" "}
+            <a
+              href="https://github.com/ashmilgit15"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-medium text-cyan-400/80 hover:text-cyan-300 transition-colors"
+            >
+              @ashmilgit15
+            </a>
           </p>
           <div className="flex items-center gap-4 text-xs text-slate-500">
+            <a
+              href="https://github.com/ashmilgit15"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hover:text-slate-300 transition-colors"
+            >
+              GitHub
+            </a>
+            <span className="h-3 w-px bg-white/10" />
             <Link to="/settings" className="hover:text-slate-300 transition-colors">Settings</Link>
             <Link to="/dashboard" className="hover:text-slate-300 transition-colors">Dashboard</Link>
           </div>
