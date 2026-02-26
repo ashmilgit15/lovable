@@ -374,6 +374,8 @@
 
   /* Ensure hosted Sandpack preview always occupies the full preview pane. */
   .forge-sandpack-host {
+    position: absolute !important;
+    inset: 0 !important;
     width: 100% !important;
     height: 100% !important;
     min-width: 0 !important;

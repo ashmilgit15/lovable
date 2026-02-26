@@ -239,6 +239,50 @@ function hasCompleteBuiltAssetBundle(
   return jsPresent && cssPresent;
 }
 
+function escapeInlineScript(content: string): string {
+  return content.replace(/<\/script/gi, "<\\/script");
+}
+
+function escapeInlineStyle(content: string): string {
+  return content.replace(/<\/style/gi, "<\\/style");
+}
+
+function inlineBuiltAssets(
+  indexHtml: string,
+  availableFiles: Record<string, string>,
+  htmlPath: string
+): string {
+  let normalized = indexHtml;
+
+  normalized = normalized.replace(
+    /<link[^>]+href=["']([^"']+\.css)["'][^>]*>\s*/gi,
+    (fullMatch, href: string) => {
+      const resolved = resolveSandpackAssetPath(href, htmlPath);
+      if (!resolved) return fullMatch;
+      const cssContent = availableFiles[resolved];
+      if (typeof cssContent !== "string") return fullMatch;
+      return `<style data-inline-href="${resolved}">\n${escapeInlineStyle(cssContent)}\n</style>\n`;
+    }
+  );
+
+  normalized = normalized.replace(
+    /<script([^>]*)src=["']([^"']+\.js)["']([^>]*)>\s*<\/script>/gi,
+    (fullMatch, attrsBeforeSrc: string, src: string, attrsAfterSrc: string) => {
+      const resolved = resolveSandpackAssetPath(src, htmlPath);
+      if (!resolved) return fullMatch;
+      const jsContent = availableFiles[resolved];
+      if (typeof jsContent !== "string") return fullMatch;
+
+      const fullAttrs = `${attrsBeforeSrc} ${attrsAfterSrc}`;
+      const isModule = /type=["']module["']/i.test(fullAttrs);
+      const typeAttr = isModule ? ' type="module"' : "";
+      return `<script${typeAttr} data-inline-src="${resolved}">\n${escapeInlineScript(jsContent)}\n</script>\n`;
+    }
+  );
+
+  return normalized;
+}
+
 function createDefaultRuntimeIndexHtml(entry: string): string {
   return `<!doctype html>
 <html lang="en">
@@ -529,6 +573,7 @@ function buildSandpackProject(files: Record<string, FileData>) {
     hasCompleteBuiltAssetBundle(indexHtml, sandpackFiles, htmlEntry);
 
   if (hasBuiltBundle) {
+    sandpackFiles[htmlEntry] = inlineBuiltAssets(indexHtml, sandpackFiles, htmlEntry);
     return {
       files: sandpackFiles,
       dependencies: {},
@@ -912,17 +957,20 @@ export default function PreviewPanel({ onSendVisualPrompt }: PreviewPanelProps) 
       <div className="relative flex min-h-0 flex-1 flex-col">
         {useBrowserPreview ? (
           sandpackProject.fileCount > 0 ? (
-            <div className="min-h-0 h-full w-full overflow-hidden bg-[#0a0a0a]">
+            <div className="relative min-h-0 h-full w-full overflow-hidden bg-[#0a0a0a]">
               <SandpackProvider
                 key={`${activeProjectId ?? "project"}:${sandboxRefreshKey}:${sandpackProject.template}:${sandpackProject.environment}`}
                 className="forge-sandpack-host"
                 style={{
+                  position: "absolute",
+                  inset: 0,
                   width: "100%",
                   height: "100%",
                   minHeight: 0,
                   minWidth: 0,
                   display: "flex",
                   flexDirection: "column",
+                  overflow: "hidden",
                 }}
                 template={sandpackProject.template}
                 files={sandpackProject.files}
