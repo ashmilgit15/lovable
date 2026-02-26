@@ -546,7 +546,7 @@ export default function PreviewPanel({ onSendVisualPrompt }: PreviewPanelProps) 
                   showRefreshButton
                   showRestartButton
                   style={{ height: "100%" }}
-                  className="flex min-h-0 flex-1 [&_.sp-stack]:min-h-0 [&_.sp-stack]:h-full [&_.sp-preview]:min-h-0 [&_.sp-preview]:h-full [&_.sp-preview-container]:min-h-0 [&_.sp-preview-container]:h-full [&_.sp-preview-container]:flex-1 [&_.sp-preview-iframe]:min-h-0 [&_.sp-preview-iframe]:h-full"
+                  className="forge-sandpack-preview flex min-h-0 flex-1 [&_.sp-stack]:min-h-0 [&_.sp-stack]:h-full [&_.sp-stack]:w-full [&_.sp-preview]:min-h-0 [&_.sp-preview]:h-full [&_.sp-preview]:w-full [&_.sp-preview-container]:min-h-0 [&_.sp-preview-container]:h-full [&_.sp-preview-container]:w-full [&_.sp-preview-container]:flex-1 [&_.sp-preview-iframe]:block [&_.sp-preview-iframe]:min-h-0 [&_.sp-preview-iframe]:h-full [&_.sp-preview-iframe]:w-full [&_.sp-preview-iframe]:flex-1 [&_.sp-bridge-frame]:hidden [&_iframe]:block [&_iframe]:h-full [&_iframe]:w-full"
                 />
               </SandpackProvider>
             </div>

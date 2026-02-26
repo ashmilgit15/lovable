@@ -346,4 +346,24 @@
   .stagger-4 { animation-delay: 0.4s; }
   .stagger-5 { animation-delay: 0.5s; }
   .stagger-6 { animation-delay: 0.6s; }
+
+  /* Ensure hosted Sandpack preview always occupies the full preview pane. */
+  .forge-sandpack-preview,
+  .forge-sandpack-preview .sp-stack,
+  .forge-sandpack-preview .sp-preview,
+  .forge-sandpack-preview .sp-preview-container,
+  .forge-sandpack-preview .sp-preview-iframe {
+    width: 100% !important;
+    height: 100% !important;
+    min-height: 0 !important;
+  }
+
+  .forge-sandpack-preview .sp-preview-container,
+  .forge-sandpack-preview .sp-preview-iframe {
+    flex: 1 1 auto !important;
+  }
+
+  .forge-sandpack-preview .sp-bridge-frame {
+    display: none !important;
+  }
 }
