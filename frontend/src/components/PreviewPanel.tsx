@@ -116,19 +116,25 @@ function normalizeBuiltIndexHtmlForSandbox(
 
   const scriptPattern =
     /<script[^>]+src=["'](\/assets\/[^"']+\.js)["'][^>]*>\s*<\/script>/i;
+
+  // Convert something like /src/main.tsx to src/main.tsx or /main.tsx for the browser preview
+  const previewEntry = entry.startsWith('/') ? entry : `/${entry}`;
+
   if (scriptPattern.test(normalized)) {
     normalized = normalized.replace(
       scriptPattern,
       (fullMatch, scriptPath: string) =>
         hasFile(scriptPath)
           ? fullMatch
-          : `<script type="module" src="${entry}"></script>`
+          : `<script type="module" src="${previewEntry}"></script>`
     );
   } else if (/<\/body>/i.test(normalized)) {
     normalized = normalized.replace(
       /<\/body>/i,
-      `  <script type="module" src="${entry}"></script>\n</body>`
+      `  <script type="module" src="${previewEntry}"></script>\n</body>`
     );
+  } else if (normalized.includes('<script type="module" src="/src/main.tsx">')) {
+    normalized = normalized.replace('<script type="module" src="/src/main.tsx">', `<script type="module" src="${previewEntry}">`)
   }
 
   return normalized;
@@ -608,8 +614,8 @@ export default function PreviewPanel({ onSendVisualPrompt }: PreviewPanelProps) 
                 </div>
               </div>
             ) : isStarting ? (
-                <div className="flex flex-col items-center animate-in fade-in duration-500">
-                  <div className="relative mb-6 h-16 w-16">
+              <div className="flex flex-col items-center animate-in fade-in duration-500">
+                <div className="relative mb-6 h-16 w-16">
                   <div className="absolute inset-0 rounded-xl border-2 border-cyan-500/20" />
                   <div className="absolute inset-0 animate-spin rounded-xl border-2 border-t-cyan-400" />
                   <Zap className="absolute inset-0 m-auto h-6 w-6 animate-pulse text-cyan-300" />
