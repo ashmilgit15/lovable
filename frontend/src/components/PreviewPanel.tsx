@@ -104,6 +104,38 @@ function resolveSandpackAssetPath(
   return normalizeSandpackPath(`${dirname(fromFile)}/${trimmed}`);
 }
 
+function findExistingSandpackPath(
+  availableFiles: Record<string, string>,
+  rawPath: string
+): string | null {
+  const normalized = normalizeSandpackPath(rawPath);
+  const candidates = [normalized];
+
+  if (normalized.startsWith("/public/")) {
+    candidates.push(normalized.replace(/^\/public/, "") || "/");
+  } else if (normalized.startsWith("/")) {
+    candidates.push(`/public${normalized}`);
+  }
+
+  if (normalized.startsWith("/dist/")) {
+    candidates.push(normalized.replace(/^\/dist/, "") || "/");
+  }
+  if (normalized.startsWith("/build/")) {
+    candidates.push(normalized.replace(/^\/build/, "") || "/");
+  }
+  if (normalized.startsWith("/out/")) {
+    candidates.push(normalized.replace(/^\/out/, "") || "/");
+  }
+
+  for (const candidate of candidates) {
+    if (Object.prototype.hasOwnProperty.call(availableFiles, candidate)) {
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
 function parseSandpackDeps(
   rawPackageJson: string | undefined
 ): Record<string, string> {
@@ -196,8 +228,7 @@ function pickFallbackCssFile(availableFiles: Record<string, string>): string | n
 }
 
 function hasFile(availableFiles: Record<string, string>, path: string): boolean {
-  const normalizedPath = normalizeSandpackPath(path);
-  return Object.prototype.hasOwnProperty.call(availableFiles, normalizedPath);
+  return Boolean(findExistingSandpackPath(availableFiles, path));
 }
 
 function extractAssetRefs(indexHtml: string): { js: string[]; css: string[] } {
@@ -259,9 +290,11 @@ function inlineBuiltAssets(
     (fullMatch, href: string) => {
       const resolved = resolveSandpackAssetPath(href, htmlPath);
       if (!resolved) return fullMatch;
-      const cssContent = availableFiles[resolved];
+      const existingPath = findExistingSandpackPath(availableFiles, resolved);
+      if (!existingPath) return fullMatch;
+      const cssContent = availableFiles[existingPath];
       if (typeof cssContent !== "string") return fullMatch;
-      return `<style data-inline-href="${resolved}">\n${escapeInlineStyle(cssContent)}\n</style>\n`;
+      return `<style data-inline-href="${existingPath}">\n${escapeInlineStyle(cssContent)}\n</style>\n`;
     }
   );
 
@@ -270,13 +303,15 @@ function inlineBuiltAssets(
     (fullMatch, attrsBeforeSrc: string, src: string, attrsAfterSrc: string) => {
       const resolved = resolveSandpackAssetPath(src, htmlPath);
       if (!resolved) return fullMatch;
-      const jsContent = availableFiles[resolved];
+      const existingPath = findExistingSandpackPath(availableFiles, resolved);
+      if (!existingPath) return fullMatch;
+      const jsContent = availableFiles[existingPath];
       if (typeof jsContent !== "string") return fullMatch;
 
       const fullAttrs = `${attrsBeforeSrc} ${attrsAfterSrc}`;
       const isModule = /type=["']module["']/i.test(fullAttrs);
       const typeAttr = isModule ? ' type="module"' : "";
-      return `<script${typeAttr} data-inline-src="${resolved}">\n${escapeInlineScript(jsContent)}\n</script>\n`;
+      return `<script${typeAttr} data-inline-src="${existingPath}">\n${escapeInlineScript(jsContent)}\n</script>\n`;
     }
   );
 
@@ -364,7 +399,7 @@ function normalizeIndexHtmlForRuntime(
 
   const hasResolvedFile = (resolvedPath: string | null) => {
     if (!resolvedPath) return false;
-    return Object.prototype.hasOwnProperty.call(availableFiles, resolvedPath);
+    return Boolean(findExistingSandpackPath(availableFiles, resolvedPath));
   };
 
   normalized = normalized.replace(
@@ -375,8 +410,12 @@ function normalizeIndexHtmlForRuntime(
         sourceHtmlPath
       );
       if (hasResolvedFile(resolvedCssHref)) {
+        const existingPath = findExistingSandpackPath(
+          availableFiles,
+          resolvedCssHref || ""
+        );
         return resolvedCssHref
-          ? fullMatch.replace(existingCssHref, resolvedCssHref)
+          ? fullMatch.replace(existingCssHref, existingPath || resolvedCssHref)
           : fullMatch;
       }
       if (!resolvedCssHref) {
@@ -423,8 +462,12 @@ function normalizeIndexHtmlForRuntime(
           sourceHtmlPath
         );
         if (hasResolvedFile(resolvedScriptPath)) {
+          const existingPath = findExistingSandpackPath(
+            availableFiles,
+            resolvedScriptPath || ""
+          );
           return resolvedScriptPath
-            ? fullMatch.replace(scriptPath, resolvedScriptPath)
+            ? fullMatch.replace(scriptPath, existingPath || resolvedScriptPath)
             : fullMatch;
         }
         if (!resolvedScriptPath) {
@@ -540,7 +583,16 @@ function buildSandpackProject(files: Record<string, FileData>) {
     if (/^\/(?:vite|tailwind|postcss|eslint)\.config\.(?:js|ts|mjs|cjs)$/.test(path)) continue;
     if (path === "/tsconfig.json" || path === "/tsconfig.node.json" || path === "/tsconfig.app.json") continue;
 
-    sandpackFiles[path] = file.content ?? "";
+    const content = file.content ?? "";
+    sandpackFiles[path] = content;
+
+    // Mirror /public assets to root to match typical references like /forge-bridge.js
+    if (path.startsWith("/public/")) {
+      const publicResolvedPath = path.replace(/^\/public/, "") || "/";
+      if (!sandpackFiles[publicResolvedPath]) {
+        sandpackFiles[publicResolvedPath] = content;
+      }
+    }
   }
 
   const entryCandidates = [
@@ -573,13 +625,15 @@ function buildSandpackProject(files: Record<string, FileData>) {
     hasCompleteBuiltAssetBundle(indexHtml, sandpackFiles, htmlEntry);
 
   if (hasBuiltBundle) {
-    sandpackFiles[htmlEntry] = inlineBuiltAssets(indexHtml, sandpackFiles, htmlEntry);
+    const staticIndexHtml = inlineBuiltAssets(indexHtml, sandpackFiles, htmlEntry);
+    sandpackFiles[htmlEntry] = staticIndexHtml;
+    sandpackFiles["/index.html"] = staticIndexHtml;
     return {
       files: sandpackFiles,
       dependencies: {},
-      entry: htmlEntry,
+      entry: "/index.html",
       environment: "static" as const,
-      activeFile: htmlEntry,
+      activeFile: "/index.html",
       fileCount: Object.keys(sandpackFiles).length,
       template: "static" as const,
     };
@@ -957,13 +1011,11 @@ export default function PreviewPanel({ onSendVisualPrompt }: PreviewPanelProps) 
       <div className="relative flex min-h-0 flex-1 flex-col">
         {useBrowserPreview ? (
           sandpackProject.fileCount > 0 ? (
-            <div className="relative min-h-0 h-full w-full overflow-hidden bg-[#0a0a0a]">
+            <div className="relative flex min-h-0 flex-1 w-full overflow-hidden bg-[#0a0a0a]">
               <SandpackProvider
                 key={`${activeProjectId ?? "project"}:${sandboxRefreshKey}:${sandpackProject.template}:${sandpackProject.environment}`}
                 className="forge-sandpack-host"
                 style={{
-                  position: "absolute",
-                  inset: 0,
                   width: "100%",
                   height: "100%",
                   minHeight: 0,
