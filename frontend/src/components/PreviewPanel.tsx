@@ -357,27 +357,44 @@ function collectUsedPackages(sandpackFiles: Record<string, string>): Set<string>
 
 function buildRuntimeCssSupport(
   sandpackFiles: Record<string, string>
-): { cssPath: string | null; includeTailwindCdn: boolean } {
+): {
+  cssPath: string | null;
+  includeTailwindCdn: boolean;
+  inlineTailwindCss: string | null;
+} {
   const cssPath = pickFallbackCssFile(sandpackFiles);
   if (!cssPath) {
-    return { cssPath: null, includeTailwindCdn: false };
+    return { cssPath: null, includeTailwindCdn: false, inlineTailwindCss: null };
   }
   const cssContent = sandpackFiles[cssPath] || "";
   const usesTailwindBuildDirectives =
     /@tailwind\s+(?:base|components|utilities)\s*;/i.test(cssContent) ||
-    /@import\s+["']tailwindcss["'];?/i.test(cssContent);
+    /@import\s+["']tailwindcss["'];?/i.test(cssContent) ||
+    /@apply\s+[^;]+;/i.test(cssContent) ||
+    /@theme\s*\{/i.test(cssContent) ||
+    /@custom-variant\s+/i.test(cssContent);
 
   if (!usesTailwindBuildDirectives) {
-    return { cssPath, includeTailwindCdn: false };
+    return { cssPath, includeTailwindCdn: false, inlineTailwindCss: null };
   }
 
-  const sanitizedCss = cssContent
-    .replace(/@import\s+["']tailwindcss["'];?\s*/gi, "")
-    .replace(/@tailwind\s+(?:base|components|utilities)\s*;\s*/gi, "");
+  // Use the browser JIT compiler so @tailwind/@apply rules still render in hosted preview.
+  // Also map Tailwind v4's @import syntax to v3 directives for broader compatibility.
+  const browserTailwindCss = cssContent
+    .replace(
+      /@import\s+["']tailwindcss["'];?\s*/gi,
+      "@tailwind base;\n@tailwind components;\n@tailwind utilities;\n"
+    )
+    .replace(/@custom-variant\s+[^\n]*\n?/gi, "")
+    .replace(/@theme\s*\{[\s\S]*?\}\s*/gi, "");
 
-  const generatedPath = "/__sandbox_preview.css";
-  sandpackFiles[generatedPath] = sanitizedCss;
-  return { cssPath: generatedPath, includeTailwindCdn: true };
+  const generatedPath = "/__sandbox_preview_tailwind.css";
+  sandpackFiles[generatedPath] = browserTailwindCss;
+  return {
+    cssPath: generatedPath,
+    includeTailwindCdn: true,
+    inlineTailwindCss: browserTailwindCss,
+  };
 }
 
 function normalizeIndexHtmlForRuntime(
@@ -386,6 +403,7 @@ function normalizeIndexHtmlForRuntime(
   availableFiles: Record<string, string>,
   cssPath: string | null,
   includeTailwindCdn: boolean,
+  inlineTailwindCss: string | null,
   sourceHtmlPath = "/index.html"
 ): string {
   let normalized = indexHtml || createDefaultRuntimeIndexHtml(entry);
@@ -414,6 +432,9 @@ function normalizeIndexHtmlForRuntime(
           availableFiles,
           resolvedCssHref || ""
         );
+        if (inlineTailwindCss && cssPath && existingPath === cssPath) {
+          return "";
+        }
         return resolvedCssHref
           ? fullMatch.replace(existingCssHref, existingPath || resolvedCssHref)
           : fullMatch;
@@ -422,6 +443,9 @@ function normalizeIndexHtmlForRuntime(
         // Keep external stylesheets untouched.
         return fullMatch;
       }
+      if (inlineTailwindCss) {
+        return "";
+      }
       if (cssPath) {
         return fullMatch.replace(existingCssHref, cssPath);
       }
@@ -429,7 +453,16 @@ function normalizeIndexHtmlForRuntime(
     }
   );
 
-  if (cssPath && !new RegExp(`href=["']${cssPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}["']`).test(normalized)) {
+  if (inlineTailwindCss) {
+    const tailwindStyleTag = `<style type="text/tailwindcss" data-inline-tailwind="true">\n${escapeInlineStyle(inlineTailwindCss)}\n</style>`;
+    if (!/data-inline-tailwind=["']true["']/i.test(normalized)) {
+      if (/<\/head>/i.test(normalized)) {
+        normalized = normalized.replace(/<\/head>/i, `  ${tailwindStyleTag}\n</head>`);
+      } else {
+        normalized = `<head>\n  ${tailwindStyleTag}\n</head>\n${normalized}`;
+      }
+    }
+  } else if (cssPath && !new RegExp(`href=["']${cssPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}["']`).test(normalized)) {
     if (/<\/head>/i.test(normalized)) {
       normalized = normalized.replace(
         /<\/head>/i,
@@ -652,6 +685,7 @@ function buildSandpackProject(files: Record<string, FileData>) {
     sandpackFiles,
     cssSupport.cssPath,
     cssSupport.includeTailwindCdn,
+    cssSupport.inlineTailwindCss,
     htmlEntry
   );
 
