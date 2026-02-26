@@ -93,11 +93,15 @@ function parseSandpackDeps(
   }
 }
 
-function parsePackageJson(rawPackageJson: string | undefined): Record<string, unknown> | null {
+function parsePackageJson(
+  rawPackageJson: string | undefined
+): Record<string, unknown> | null {
   if (!rawPackageJson) return null;
   try {
     const parsed = JSON.parse(rawPackageJson);
-    return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : null;
+    return parsed && typeof parsed === "object"
+      ? (parsed as Record<string, unknown>)
+      : null;
   } catch {
     return null;
   }
@@ -112,107 +116,6 @@ function toStringDeps(value: unknown): Record<string, string> {
     }
   }
   return out;
-}
-
-function hasViteTooling(files: Record<string, string>, pkg: Record<string, unknown> | null): boolean {
-  const hasViteConfig = Object.keys(files).some((path) =>
-    /^\/vite\.config\.(?:ts|js|mts|mjs|cts|cjs)$/i.test(path)
-  );
-  if (hasViteConfig) return true;
-  if (!pkg) return false;
-
-  const dependencies = toStringDeps(pkg.dependencies);
-  const devDependencies = toStringDeps(pkg.devDependencies);
-  if (dependencies.vite || devDependencies.vite) return true;
-
-  const scripts = pkg.scripts && typeof pkg.scripts === "object"
-    ? (pkg.scripts as Record<string, unknown>)
-    : {};
-  const scriptValues = Object.values(scripts)
-    .filter((value): value is string => typeof value === "string")
-    .join(" ");
-
-  return /\bvite\b/i.test(scriptValues);
-}
-
-function normalizePackageJsonForSandbox(
-  sandpackFiles: Record<string, string>,
-  entry: string | undefined
-): {
-  dependencies: Record<string, string>;
-  hasPackageJson: boolean;
-  usesVite: boolean;
-} {
-  const rawPackageJson = sandpackFiles["/package.json"];
-  const parsed = parsePackageJson(rawPackageJson);
-  if (!parsed) {
-    return {
-      dependencies: parseSandpackDeps(rawPackageJson),
-      hasPackageJson: false,
-      usesVite: false,
-    };
-  }
-
-  const dependencies = toStringDeps(parsed.dependencies);
-  const devDependencies = toStringDeps(parsed.devDependencies);
-  const usesVite = hasViteTooling(sandpackFiles, parsed);
-
-  const normalized: Record<string, unknown> = {
-    ...parsed,
-    dependencies: { ...dependencies },
-  };
-
-  if (usesVite) {
-    const toolingAllowlist = new Set([
-      "vite",
-      "esbuild",
-      "esbuild-wasm",
-      "@vitejs/plugin-react",
-      "@vitejs/plugin-react-swc",
-      "@tailwindcss/vite",
-      "tailwindcss",
-      "postcss",
-      "autoprefixer",
-      "typescript",
-    ]);
-
-    for (const [name, version] of Object.entries(devDependencies)) {
-      if (toolingAllowlist.has(name)) {
-        (normalized.dependencies as Record<string, string>)[name] = version;
-      }
-    }
-
-    if (!(normalized.dependencies as Record<string, string>).vite) {
-      (normalized.dependencies as Record<string, string>).vite = "^7.3.1";
-    }
-    if (!(normalized.dependencies as Record<string, string>)["esbuild-wasm"]) {
-      (normalized.dependencies as Record<string, string>)["esbuild-wasm"] = "^0.25.0";
-    }
-
-    const scripts =
-      parsed.scripts && typeof parsed.scripts === "object"
-        ? { ...(parsed.scripts as Record<string, unknown>) }
-        : {};
-    const startScript = typeof scripts.start === "string" ? scripts.start : "";
-    if (!/\bvite\b/i.test(startScript)) {
-      scripts.start = "vite --host 0.0.0.0 --port 3000";
-    }
-    normalized.scripts = scripts;
-  }
-
-  normalized.main =
-    entry ||
-    (typeof parsed.main === "string" && parsed.main.trim() ? parsed.main : "/src/main.tsx");
-
-  // Sandpack installs runtime deps only; keeping dev deps often causes confusion for Vite projects.
-  delete normalized.devDependencies;
-
-  sandpackFiles["/package.json"] = JSON.stringify(normalized, null, 2);
-  return {
-    dependencies: normalized.dependencies as Record<string, string>,
-    hasPackageJson: true,
-    usesVite,
-  };
 }
 
 function pickFallbackCssFile(availableFiles: Record<string, string>): string | null {
@@ -234,63 +137,222 @@ function pickFallbackCssFile(availableFiles: Record<string, string>): string | n
   return firstCss || null;
 }
 
-function normalizeBuiltIndexHtmlForSandbox(
-  indexHtml: string,
-  entry: string | undefined,
-  availableFiles: Record<string, string>
-): string {
-  if (!entry) return indexHtml;
+function hasFile(availableFiles: Record<string, string>, path: string): boolean {
+  const normalizedPath = normalizeSandpackPath(path);
+  return Object.prototype.hasOwnProperty.call(availableFiles, normalizedPath);
+}
 
-  const hasBuiltAssetRefs = /\/assets\/[^"']+\.(?:css|js)/i.test(indexHtml);
-  if (!hasBuiltAssetRefs) return indexHtml;
+function extractAssetRefs(indexHtml: string): { js: string[]; css: string[] } {
+  const js: string[] = [];
+  const css: string[] = [];
+  indexHtml.replace(
+    /<script[^>]+src=["']([^"']+\.js)["'][^>]*>\s*<\/script>/gi,
+    (_match, src: string) => {
+      js.push(src);
+      return _match;
+    }
+  );
+  indexHtml.replace(
+    /<link[^>]+href=["']([^"']+\.css)["'][^>]*>\s*/gi,
+    (_match, href: string) => {
+      css.push(href);
+      return _match;
+    }
+  );
+  return { js, css };
+}
+
+function hasCompleteBuiltAssetBundle(
+  indexHtml: string,
+  availableFiles: Record<string, string>
+): boolean {
+  const refs = extractAssetRefs(indexHtml);
+  if (refs.js.length === 0) return false;
+  const jsPresent = refs.js.every((path) => hasFile(availableFiles, path));
+  const cssPresent = refs.css.every((path) => hasFile(availableFiles, path));
+  return jsPresent && cssPresent;
+}
+
+function createDefaultRuntimeIndexHtml(entry: string): string {
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Preview</title>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="module" src="${entry}"></script>
+</body>
+</html>`;
+}
+
+function buildRuntimeCssSupport(
+  sandpackFiles: Record<string, string>
+): { cssPath: string | null; includeTailwindCdn: boolean } {
+  const cssPath = pickFallbackCssFile(sandpackFiles);
+  if (!cssPath) {
+    return { cssPath: null, includeTailwindCdn: false };
+  }
+  const cssContent = sandpackFiles[cssPath] || "";
+  const usesTailwindBuildDirectives =
+    /@tailwind\s+(?:base|components|utilities)\s*;/i.test(cssContent) ||
+    /@import\s+["']tailwindcss["'];?/i.test(cssContent);
+
+  if (!usesTailwindBuildDirectives) {
+    return { cssPath, includeTailwindCdn: false };
+  }
+
+  const sanitizedCss = cssContent
+    .replace(/@import\s+["']tailwindcss["'];?\s*/gi, "")
+    .replace(/@tailwind\s+(?:base|components|utilities)\s*;\s*/gi, "");
+
+  const generatedPath = "/__sandbox_preview.css";
+  sandpackFiles[generatedPath] = sanitizedCss;
+  return { cssPath: generatedPath, includeTailwindCdn: true };
+}
+
+function normalizeIndexHtmlForRuntime(
+  indexHtml: string,
+  entry: string,
+  availableFiles: Record<string, string>,
+  cssPath: string | null,
+  includeTailwindCdn: boolean
+): string {
+  let normalized = indexHtml || createDefaultRuntimeIndexHtml(entry);
+
+  if (!/<div[^>]+id=["']root["'][^>]*>/i.test(normalized)) {
+    normalized = normalized.replace(
+      /<body[^>]*>/i,
+      `$&\n  <div id="root"></div>`
+    );
+  }
 
   const hasFile = (path: string) => {
     const normalizedPath = normalizeSandpackPath(path);
     return Object.prototype.hasOwnProperty.call(availableFiles, normalizedPath);
   };
 
-  const fallbackCssFile = pickFallbackCssFile(availableFiles);
-
-  let normalized = indexHtml;
   normalized = normalized.replace(
     /<link[^>]+href=["']([^"']+\.css)["'][^>]*>\s*/gi,
-    (fullMatch, cssPath: string) => {
-      if (hasFile(cssPath)) return fullMatch;
-      if (fallbackCssFile) {
-        return fullMatch.replace(cssPath, fallbackCssFile);
+    (fullMatch, existingCssHref: string) => {
+      if (hasFile(existingCssHref)) return fullMatch;
+      if (cssPath) {
+        return fullMatch.replace(existingCssHref, cssPath);
       }
-      return fullMatch;
+      return "";
     }
   );
 
+  if (cssPath && !new RegExp(`href=["']${cssPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}["']`).test(normalized)) {
+    if (/<\/head>/i.test(normalized)) {
+      normalized = normalized.replace(
+        /<\/head>/i,
+        `  <link rel="stylesheet" href="${cssPath}" />\n</head>`
+      );
+    } else {
+      normalized = `<head>\n  <link rel="stylesheet" href="${cssPath}" />\n</head>\n${normalized}`;
+    }
+  }
+
+  if (includeTailwindCdn && !/cdn\.tailwindcss\.com/i.test(normalized)) {
+    if (/<\/head>/i.test(normalized)) {
+      normalized = normalized.replace(
+        /<\/head>/i,
+        `  <script src="https://cdn.tailwindcss.com"></script>\n</head>`
+      );
+    } else {
+      normalized = `<head>\n  <script src="https://cdn.tailwindcss.com"></script>\n</head>\n${normalized}`;
+    }
+  }
+
   const scriptPattern =
-    /<script[^>]+src=["'](\/assets\/[^"']+\.js)["'][^>]*>\s*<\/script>/i;
-
-  // Convert something like /src/main.tsx to src/main.tsx or /main.tsx for the browser preview
-  const previewEntry = entry.startsWith('/') ? entry : `/${entry}`;
-
+    /<script[^>]+type=["']module["'][^>]+src=["']([^"']+)["'][^>]*>\s*<\/script>/i;
   if (scriptPattern.test(normalized)) {
     normalized = normalized.replace(
       scriptPattern,
-      (fullMatch, scriptPath: string) =>
-        hasFile(scriptPath)
-          ? fullMatch
-          : entry
-            ? `<script type="module" src="${previewEntry}"></script>`
-            : fullMatch
+      (fullMatch, scriptPath: string) => (hasFile(scriptPath) ? fullMatch : `<script type="module" src="${entry}"></script>`)
     );
   } else if (/<\/body>/i.test(normalized)) {
-    if (entry) {
-      normalized = normalized.replace(
-        /<\/body>/i,
-        `  <script type="module" src="${previewEntry}"></script>\n</body>`
-      );
-    }
-  } else if (normalized.includes('<script type="module" src="/src/main.tsx">')) {
-    normalized = normalized.replace('<script type="module" src="/src/main.tsx">', `<script type="module" src="${previewEntry}">`);
+    normalized = normalized.replace(
+      /<\/body>/i,
+      `  <script type="module" src="${entry}"></script>\n</body>`
+    );
+  } else {
+    normalized += `\n<script type="module" src="${entry}"></script>`;
   }
 
   return normalized;
+}
+
+function ensureRuntimePackageJson(
+  sandpackFiles: Record<string, string>,
+  entry: string,
+  hasTypescript: boolean
+): Record<string, string> {
+  const rawPackageJson = sandpackFiles["/package.json"];
+  const parsed = parsePackageJson(rawPackageJson);
+
+  const blockedPackages = [
+    /^vite$/i,
+    /^esbuild/i,
+    /^@vitejs\//i,
+    /^typescript$/i,
+    /^eslint/i,
+    /^tailwindcss$/i,
+    /^postcss$/i,
+    /^autoprefixer$/i,
+    /^@tailwindcss\//i,
+  ];
+
+  if (!parsed) {
+    const dependencies = parseSandpackDeps(rawPackageJson);
+    if (!dependencies.react) dependencies.react = "^19.0.0";
+    if (!dependencies["react-dom"]) dependencies["react-dom"] = "^19.0.0";
+
+    sandpackFiles["/package.json"] = JSON.stringify(
+      {
+        name: "sandpack-project",
+        main: entry,
+        dependencies,
+      },
+      null,
+      2
+    );
+    return dependencies;
+  }
+
+  const runtimeDependencies: Record<string, string> = {};
+  const allDependencies = {
+    ...toStringDeps(parsed.dependencies),
+    ...toStringDeps(parsed.devDependencies),
+  };
+
+  for (const [name, version] of Object.entries(allDependencies)) {
+    if (blockedPackages.some((pattern) => pattern.test(name))) continue;
+    runtimeDependencies[name] = version;
+  }
+
+  if (!runtimeDependencies.react) runtimeDependencies.react = "^19.0.0";
+  if (!runtimeDependencies["react-dom"]) runtimeDependencies["react-dom"] = "^19.0.0";
+
+  if (hasTypescript) {
+    if (!runtimeDependencies.typescript) runtimeDependencies.typescript = "^5.9.0";
+    if (!runtimeDependencies["@types/react"]) runtimeDependencies["@types/react"] = "^19.0.0";
+    if (!runtimeDependencies["@types/react-dom"]) runtimeDependencies["@types/react-dom"] = "^19.0.0";
+  }
+
+  const normalized: Record<string, unknown> = {
+    ...parsed,
+    main: entry,
+    dependencies: runtimeDependencies,
+  };
+  delete normalized.devDependencies;
+  delete normalized.type;
+
+  sandpackFiles["/package.json"] = JSON.stringify(normalized, null, 2);
+  return runtimeDependencies;
 }
 
 function buildSandpackProject(files: Record<string, FileData>) {
@@ -312,45 +374,55 @@ function buildSandpackProject(files: Record<string, FileData>) {
     "/index.jsx",
   ];
   const entry = entryCandidates.find((candidate) => sandpackFiles[candidate]);
-  const activeFile = entry || Object.keys(sandpackFiles)[0] || "/src/main.tsx";
-
-  const { dependencies, hasPackageJson, usesVite } = normalizePackageJsonForSandbox(
-    sandpackFiles,
-    entry
-  );
-
-  if (sandpackFiles["/index.html"]) {
-    sandpackFiles["/index.html"] = normalizeBuiltIndexHtmlForSandbox(
-      sandpackFiles["/index.html"],
-      entry,
-      sandpackFiles
-    );
-  }
-
   const hasTypescript = Object.keys(sandpackFiles).some(
     (path) => path.endsWith(".ts") || path.endsWith(".tsx")
   );
-  const template = usesVite
-    ? hasTypescript
-      ? "vite-react-ts"
-      : "vite-react"
-    : hasTypescript
-      ? "react-ts"
-      : "react";
-  const environment = usesVite
-    ? "node"
-    : hasTypescript
-      ? "create-react-app-typescript"
-      : "create-react-app";
+  const defaultEntry = hasTypescript ? "/src/main.tsx" : "/src/main.jsx";
+  const effectiveEntry = entry || defaultEntry;
+
+  const indexHtml = sandpackFiles["/index.html"] || "";
+  const hasBuiltBundle = Boolean(indexHtml) &&
+    hasCompleteBuiltAssetBundle(indexHtml, sandpackFiles);
+
+  if (hasBuiltBundle) {
+    return {
+      files: sandpackFiles,
+      dependencies: {},
+      entry: "/index.html",
+      environment: "static" as const,
+      activeFile: "/index.html",
+      fileCount: Object.keys(sandpackFiles).length,
+      template: "static" as const,
+    };
+  }
+
+  const dependencies = ensureRuntimePackageJson(
+    sandpackFiles,
+    effectiveEntry,
+    hasTypescript
+  );
+  const cssSupport = buildRuntimeCssSupport(sandpackFiles);
+  sandpackFiles["/index.html"] = normalizeIndexHtmlForRuntime(
+    indexHtml,
+    effectiveEntry,
+    sandpackFiles,
+    cssSupport.cssPath,
+    cssSupport.includeTailwindCdn
+  );
+
+  const activeFile = entry || Object.keys(sandpackFiles)[0] || effectiveEntry;
+  const environment = hasTypescript
+    ? "create-react-app-typescript"
+    : "create-react-app";
 
   return {
     files: sandpackFiles,
-    dependencies: hasPackageJson ? {} : dependencies,
-    entry,
+    dependencies,
+    entry: effectiveEntry,
     environment,
     activeFile,
     fileCount: Object.keys(sandpackFiles).length,
-    template,
+    template: hasTypescript ? "react-ts" : "react",
   } as const;
 }
 
@@ -696,7 +768,7 @@ export default function PreviewPanel({ onSendVisualPrompt }: PreviewPanelProps) 
           sandpackProject.fileCount > 0 ? (
             <div className="flex min-h-0 flex-1 overflow-hidden bg-[#0a0a0a]">
               <SandpackProvider
-                key={`${activeProjectId ?? "project"}:${sandboxRefreshKey}`}
+                key={`${activeProjectId ?? "project"}:${sandboxRefreshKey}:${sandpackProject.template}:${sandpackProject.environment}`}
                 template={sandpackProject.template}
                 files={sandpackProject.files}
                 customSetup={{
@@ -715,7 +787,7 @@ export default function PreviewPanel({ onSendVisualPrompt }: PreviewPanelProps) 
                   showRefreshButton
                   showRestartButton
                   style={{ height: "100%" }}
-                  className="forge-sandpack-preview flex min-h-0 flex-1 [&_.sp-stack]:min-h-0 [&_.sp-stack]:h-full [&_.sp-stack]:w-full [&_.sp-preview]:min-h-0 [&_.sp-preview]:h-full [&_.sp-preview]:w-full [&_.sp-preview-container]:min-h-0 [&_.sp-preview-container]:h-full [&_.sp-preview-container]:w-full [&_.sp-preview-container]:flex-1 [&_.sp-preview-iframe]:block [&_.sp-preview-iframe]:min-h-0 [&_.sp-preview-iframe]:h-full [&_.sp-preview-iframe]:w-full [&_.sp-preview-iframe]:flex-1 [&_.sp-bridge-frame]:hidden [&_iframe]:block [&_iframe]:h-full [&_iframe]:w-full"
+                  className="forge-sandpack-preview flex min-h-0 flex-1 [&_.sp-stack]:min-h-0 [&_.sp-stack]:h-full [&_.sp-stack]:w-full [&_.sp-preview]:min-h-0 [&_.sp-preview]:h-full [&_.sp-preview]:w-full [&_.sp-preview-container]:min-h-0 [&_.sp-preview-container]:h-full [&_.sp-preview-container]:w-full [&_.sp-preview-container]:flex-1 [&_.sp-preview-iframe]:block [&_.sp-preview-iframe]:min-h-0 [&_.sp-preview-iframe]:h-full [&_.sp-preview-iframe]:w-full [&_.sp-preview-iframe]:flex-1 [&_iframe]:block [&_iframe]:h-full [&_iframe]:w-full"
                 />
               </SandpackProvider>
             </div>
