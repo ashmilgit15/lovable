@@ -157,9 +157,6 @@ function parseSandpackDeps(
       /^@vitejs\//i,
       /^typescript$/i,
       /^eslint/i,
-      /^tailwindcss$/i,
-      /^postcss$/i,
-      /^autoprefixer$/i,
     ];
 
     for (const [name, value] of Object.entries(sourceDependencies)) {
@@ -389,10 +386,20 @@ function buildRuntimeCssSupport(
   cssPath: string | null;
   includeTailwindCdn: boolean;
   inlineTailwindCss: string | null;
+  sourceCssPath: string | null;
+  usesTailwindBuildDirectives: boolean;
+  tailwindRuntime: "v3" | "v4" | null;
 } {
   const cssPath = pickFallbackCssFile(sandpackFiles);
   if (!cssPath) {
-    return { cssPath: null, includeTailwindCdn: false, inlineTailwindCss: null };
+    return {
+      cssPath: null,
+      includeTailwindCdn: false,
+      inlineTailwindCss: null,
+      sourceCssPath: null,
+      usesTailwindBuildDirectives: false,
+      tailwindRuntime: null,
+    };
   }
   const cssContent = sandpackFiles[cssPath] || "";
   const usesTailwindBuildDirectives =
@@ -402,19 +409,29 @@ function buildRuntimeCssSupport(
     /@theme\s*\{/i.test(cssContent) ||
     /@custom-variant\s+/i.test(cssContent);
 
+  const usesTailwindV4Directives =
+    /@import\s+["']tailwindcss["'];?/i.test(cssContent) ||
+    /@theme\s*\{/i.test(cssContent) ||
+    /@custom-variant\s+/i.test(cssContent);
+
   if (!usesTailwindBuildDirectives) {
-    return { cssPath, includeTailwindCdn: false, inlineTailwindCss: null };
+    return {
+      cssPath,
+      includeTailwindCdn: false,
+      inlineTailwindCss: null,
+      sourceCssPath: cssPath,
+      usesTailwindBuildDirectives: false,
+      tailwindRuntime: null,
+    };
   }
 
-  // Tailwind runtime input (browser compiler):
-  // - normalize v4 @import syntax to explicit directives
-  // - remove @apply to avoid runtime compile stops on custom tokens
+  // Tailwind runtime input (browser compiler).
+  // Normalize v4 @import syntax to explicit directives for broad runtime compatibility.
   let browserTailwindCss = cssContent
     .replace(
       /@import\s+["']tailwindcss["'];?\s*/gi,
       "@tailwind base;\n@tailwind components;\n@tailwind utilities;\n"
-    )
-    .replace(/@apply\s+[^;]+;/gi, "");
+    );
   if (!/@tailwind\s+(?:base|components|utilities)\s*;/i.test(browserTailwindCss)) {
     browserTailwindCss = `@tailwind base;\n@tailwind components;\n@tailwind utilities;\n${browserTailwindCss}`;
   }
@@ -434,6 +451,9 @@ function buildRuntimeCssSupport(
     cssPath: generatedPath,
     includeTailwindCdn: true,
     inlineTailwindCss: browserTailwindCss,
+    sourceCssPath: cssPath,
+    usesTailwindBuildDirectives: true,
+    tailwindRuntime: usesTailwindV4Directives ? "v4" : "v3",
   };
 }
 
@@ -444,6 +464,7 @@ function normalizeIndexHtmlForRuntime(
   cssPath: string | null,
   includeTailwindCdn: boolean,
   inlineTailwindCss: string | null,
+  tailwindRuntime: "v3" | "v4" | null,
   sourceHtmlPath = "/index.html"
 ): string {
   let normalized = indexHtml || createDefaultRuntimeIndexHtml(entry);
@@ -496,7 +517,12 @@ function normalizeIndexHtmlForRuntime(
         normalized = `<head>\n  ${tailwindStyleTag}\n</head>\n${normalized}`;
       }
     }
-  } else if (cssPath && !new RegExp(`href=["']${cssPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}["']`).test(normalized)) {
+  }
+
+  if (
+    cssPath &&
+    !new RegExp(`href=["']${cssPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}["']`).test(normalized)
+  ) {
     if (/<\/head>/i.test(normalized)) {
       normalized = normalized.replace(
         /<\/head>/i,
@@ -511,8 +537,9 @@ function normalizeIndexHtmlForRuntime(
     includeTailwindCdn &&
     !/cdn\.tailwindcss\.com|@tailwindcss\/browser@4/i.test(normalized)
   ) {
-    const tailwindBrowserScript =
-      "https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4";
+    const tailwindBrowserScript = tailwindRuntime === "v4"
+      ? "https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"
+      : "https://cdn.tailwindcss.com";
     if (/<\/head>/i.test(normalized)) {
       normalized = normalized.replace(
         /<\/head>/i,
@@ -561,11 +588,42 @@ function normalizeIndexHtmlForRuntime(
   return normalized;
 }
 
+function rewriteEntryCssImportForRuntime(
+  sandpackFiles: Record<string, string>,
+  entry: string,
+  sourceCssPath: string | null,
+  runtimeCssPath: string | null
+) {
+  if (!sourceCssPath || !runtimeCssPath || sourceCssPath === runtimeCssPath) return;
+
+  const entryContent = sandpackFiles[entry];
+  if (typeof entryContent !== "string" || !entryContent) return;
+
+  const importPattern = /(^|\n)\s*import\s+["']([^"']+\.css(?:\?[^"']*)?)["'];?/g;
+  let changed = false;
+  const nextContent = entryContent.replace(
+    importPattern,
+    (fullMatch, prefix: string, specifier: string) => {
+      const resolved = resolveSandpackAssetPath(specifier, entry);
+      if (!resolved) return fullMatch;
+      const existingPath = findExistingSandpackPath(sandpackFiles, resolved) || resolved;
+      if (existingPath !== sourceCssPath) return fullMatch;
+      changed = true;
+      return `${prefix}import "${runtimeCssPath}";`;
+    }
+  );
+
+  if (changed) {
+    sandpackFiles[entry] = nextContent;
+  }
+}
+
 function ensureRuntimePackageJson(
   sandpackFiles: Record<string, string>,
   entry: string,
   hasTypescript: boolean,
-  usedPackages: Set<string>
+  usedPackages: Set<string>,
+  extraDependencies: string[] = []
 ): Record<string, string> {
   const rawPackageJson = sandpackFiles["/package.json"];
   const parsed = parsePackageJson(rawPackageJson);
@@ -576,10 +634,6 @@ function ensureRuntimePackageJson(
     /^@vitejs\//i,
     /^typescript$/i,
     /^eslint/i,
-    /^tailwindcss$/i,
-    /^postcss$/i,
-    /^autoprefixer$/i,
-    /^@tailwindcss\//i,
   ];
 
   if (!parsed) {
@@ -587,6 +641,12 @@ function ensureRuntimePackageJson(
     const discovered = parseSandpackDeps(rawPackageJson);
     for (const pkg of usedPackages) {
       dependencies[pkg] = discovered[pkg] || "latest";
+    }
+    for (const pkg of extraDependencies) {
+      if (blockedPackages.some((pattern) => pattern.test(pkg))) continue;
+      if (!dependencies[pkg]) {
+        dependencies[pkg] = discovered[pkg] || "latest";
+      }
     }
     if (!dependencies.react) dependencies.react = "^19.0.0";
     if (!dependencies["react-dom"]) dependencies["react-dom"] = "^19.0.0";
@@ -616,6 +676,12 @@ function ensureRuntimePackageJson(
   }
 
   for (const pkg of usedPackages) {
+    if (blockedPackages.some((pattern) => pattern.test(pkg))) continue;
+    if (!runtimeDependencies[pkg]) {
+      runtimeDependencies[pkg] = allDependencies[pkg] || "latest";
+    }
+  }
+  for (const pkg of extraDependencies) {
     if (blockedPackages.some((pattern) => pattern.test(pkg))) continue;
     if (!runtimeDependencies[pkg]) {
       runtimeDependencies[pkg] = allDependencies[pkg] || "latest";
@@ -652,7 +718,7 @@ function buildSandpackProject(files: Record<string, FileData>) {
 
     // Ignore build tooling config files in Sandpack to force legacy client bundler instead of heavy WebContainers Node
     // This fixes "Failed to get shell by ID" crashes inside the preview
-    if (/^\/(?:vite|tailwind|postcss|eslint)\.config\.(?:js|ts|mjs|cjs)$/.test(path)) continue;
+    if (/^\/(?:vite|eslint)\.config\.(?:js|ts|mjs|cjs)$/.test(path)) continue;
     if (path === "/tsconfig.json" || path === "/tsconfig.node.json" || path === "/tsconfig.app.json") continue;
 
     const content = file.content ?? "";
@@ -711,13 +777,22 @@ function buildSandpackProject(files: Record<string, FileData>) {
     };
   }
 
+  const cssSupport = buildRuntimeCssSupport(sandpackFiles);
+  rewriteEntryCssImportForRuntime(
+    sandpackFiles,
+    effectiveEntry,
+    cssSupport.sourceCssPath,
+    cssSupport.cssPath
+  );
   const dependencies = ensureRuntimePackageJson(
     sandpackFiles,
     effectiveEntry,
     hasTypescript,
-    collectUsedPackages(sandpackFiles)
+    collectUsedPackages(sandpackFiles),
+    cssSupport.usesTailwindBuildDirectives
+      ? ["tailwindcss", "postcss", "autoprefixer", "tailwindcss-animate"]
+      : []
   );
-  const cssSupport = buildRuntimeCssSupport(sandpackFiles);
   sandpackFiles["/index.html"] = normalizeIndexHtmlForRuntime(
     indexHtml,
     effectiveEntry,
@@ -725,6 +800,7 @@ function buildSandpackProject(files: Record<string, FileData>) {
     cssSupport.cssPath,
     cssSupport.includeTailwindCdn,
     cssSupport.inlineTailwindCss,
+    cssSupport.tailwindRuntime,
     htmlEntry
   );
 
