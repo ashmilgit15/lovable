@@ -34,10 +34,10 @@ export default function ModelPicker() {
         <Button
           variant="outline"
           size="sm"
-          className="h-7 gap-2 border-white/10 bg-slate-900/70 text-xs text-slate-300 transition-all hover:border-cyan-400/40 hover:bg-slate-800/70 hover:text-slate-100"
+          className="h-7 gap-1.5 border-white/10 bg-slate-900/70 px-2 text-xs text-slate-300 transition-all hover:border-cyan-400/40 hover:bg-slate-800/70 hover:text-slate-100 sm:gap-2"
         >
           <Box className="h-3.5 w-3.5 text-cyan-300" />
-          <span className="truncate max-w-[120px]">{currentModel}</span>
+          <span className="max-w-[84px] truncate sm:max-w-[120px]">{currentModel}</span>
           <ChevronDown className="h-3 w-3 opacity-50" />
         </Button>
       </DropdownMenuTrigger>

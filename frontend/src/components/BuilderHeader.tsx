@@ -108,7 +108,7 @@ export default function BuilderHeader({
   };
 
   return (
-    <header className="panel-header relative z-20 flex h-[54px] items-center justify-between border-b border-white/10 bg-slate-950/40 px-4 backdrop-blur-xl">
+    <header className="panel-header relative z-20 flex h-auto flex-wrap items-center justify-between gap-y-1 border-b border-white/10 bg-slate-950/40 px-3 py-2 backdrop-blur-xl md:h-[54px] md:flex-nowrap md:gap-y-0 md:px-4 md:py-0">
       {/* Left: Logo & Back */}
       <div className="flex items-center gap-3">
         <Link to="/dashboard" className="text-slate-400 hover:text-slate-100 transition-colors">
@@ -126,7 +126,7 @@ export default function BuilderHeader({
       </div>
 
       {/* Center: Project Name */}
-      <div className="absolute left-1/2 top-1/2 -translate-x-1/2 flex items-center gap-2">
+      <div className="order-3 flex w-full items-center justify-center gap-2 pt-0.5 md:absolute md:left-1/2 md:top-1/2 md:order-none md:w-auto md:-translate-x-1/2 md:pt-0">
         {isEditing ? (
           <div className="flex items-center">
             <Input
@@ -135,22 +135,24 @@ export default function BuilderHeader({
               onChange={(e) => setEditedName(e.target.value)}
               onKeyDown={handleKeyDown}
               onBlur={handleRename}
-              className="h-7 w-[220px] text-center bg-slate-900/70 border-cyan-500/40 focus-visible:ring-cyan-400/40 text-sm text-slate-100"
+              className="h-7 w-[180px] text-center bg-slate-900/70 border-cyan-500/40 text-sm text-slate-100 focus-visible:ring-cyan-400/40 sm:w-[220px]"
             />
           </div>
         ) : (
           <button
             onClick={() => setIsEditing(true)}
-            className="group flex items-center gap-2 rounded px-2 py-1 hover:bg-slate-800/60 transition-colors"
+            className="group flex max-w-full items-center gap-2 rounded px-2 py-1 transition-colors hover:bg-slate-800/60"
           >
-            <span className="font-medium text-sm text-slate-200">{projectName}</span>
+            <span className="max-w-[220px] truncate text-sm font-medium text-slate-200 sm:max-w-[320px]">
+              {projectName}
+            </span>
             <Pencil className="h-3 w-3 text-slate-500 opacity-0 group-hover:opacity-100 transition-opacity" />
           </button>
         )}
       </div>
 
       {/* Right: Controls */}
-      <div className="flex items-center gap-3">
+      <div className="ml-auto flex items-center gap-1.5 sm:gap-3">
         {/* Connection Status (Hidden on small screens, or subtle) */}
         <div className={cn(
           "flex items-center gap-1.5 text-[10px] font-medium px-2 py-0.5 rounded-full transition-colors",
@@ -169,11 +171,11 @@ export default function BuilderHeader({
           </span>
         </div>
 
-        <div className="mx-1 h-4 w-[1px] bg-white/15" />
+        <div className="mx-1 hidden h-4 w-[1px] bg-white/15 sm:block" />
 
         <ModelPicker />
 
-        <div className="mx-1 h-4 w-[1px] bg-white/15" />
+        <div className="mx-1 hidden h-4 w-[1px] bg-white/15 sm:block" />
 
         <Button
           variant="ghost"

@@ -52,7 +52,7 @@ export default function Settings() {
 
   return (
     <div className="app-shell relative flex min-h-screen flex-col text-foreground">
-      <header className="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-white/8 bg-slate-950/60 px-6 backdrop-blur-2xl">
+      <header className="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-white/8 bg-slate-950/60 px-4 backdrop-blur-2xl sm:px-6">
         <Link to="/" className="flex items-center gap-2">
           <div className="rounded-xl bg-gradient-to-br from-cyan-400 to-emerald-500 p-1.5 shadow-lg shadow-cyan-500/30">
             <Zap className="h-4 w-4 fill-current text-white" />
@@ -76,7 +76,7 @@ export default function Settings() {
         </div>
       </header>
 
-      <main className="relative z-10 flex-1 px-6 pb-10 pt-8 sm:px-10">
+      <main className="relative z-10 flex-1 px-4 pb-10 pt-8 sm:px-10">
         <div className="mx-auto max-w-5xl space-y-8">
           <section className="panel-surface rounded-2xl p-6">
             <div className="flex items-start gap-3">

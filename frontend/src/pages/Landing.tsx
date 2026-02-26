@@ -126,7 +126,7 @@ export default function Landing() {
   return (
     <div className="app-shell relative flex min-h-screen flex-col text-foreground">
       {/* ─── Navbar ─── */}
-      <header className="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-white/8 bg-slate-950/60 px-6 backdrop-blur-2xl">
+      <header className="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-white/8 bg-slate-950/60 px-4 backdrop-blur-2xl sm:px-6">
         <div className="flex items-center gap-2.5">
           <div className="rounded-xl bg-gradient-to-br from-cyan-400 to-emerald-500 p-1.5 shadow-lg shadow-cyan-500/30 animate-pulse-glow">
             <Zap className="h-4 w-4 fill-current text-white" />
@@ -142,7 +142,7 @@ export default function Landing() {
           <a href="#templates" className="text-sm text-slate-400 hover:text-slate-100 transition-colors">Templates</a>
         </nav>
 
-        <div className="flex items-center gap-2 sm:gap-4">
+        <div className="flex items-center gap-1.5 sm:gap-4">
           <Link to="/settings">
             <Button
               variant="ghost"
@@ -159,7 +159,9 @@ export default function Landing() {
               <SignedIn>
                 <Link to="/dashboard">
                   <Button size="sm" className="gap-1.5 bg-gradient-to-r from-cyan-500 to-emerald-500 text-white hover:from-cyan-400 hover:to-emerald-400 shadow-md shadow-cyan-500/20">
-                    Open Studio <ArrowRight className="h-4 w-4" />
+                    <span className="hidden sm:inline">Open Studio</span>
+                    <span className="sm:hidden">Studio</span>
+                    <ArrowRight className="h-4 w-4" />
                   </Button>
                 </Link>
               </SignedIn>
@@ -174,7 +176,8 @@ export default function Landing() {
           ) : (
             <Link to="/dashboard">
               <Button size="sm" className="bg-gradient-to-r from-cyan-500 to-emerald-500 text-white hover:from-cyan-400 hover:to-emerald-400 shadow-md shadow-cyan-500/20">
-                Open Studio
+                <span className="hidden sm:inline">Open Studio</span>
+                <span className="sm:hidden">Studio</span>
               </Button>
             </Link>
           )}

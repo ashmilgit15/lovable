@@ -30,7 +30,7 @@ export default function CollaborationBar({
   onApproveSuggestion,
 }: CollaborationBarProps) {
   return (
-    <div className="panel-surface flex items-center gap-3 rounded-2xl border-white/15 bg-slate-900/55 px-3 py-2">
+    <div className="panel-surface flex flex-wrap items-center gap-2 rounded-2xl border-white/15 bg-slate-900/55 px-3 py-2 sm:gap-3">
       <div className="flex items-center gap-2 text-xs text-gray-400">
         <Users className="h-3.5 w-3.5 text-cyan-300" />
         <span>{connected ? "Collab live" : "Collab offline"}</span>
@@ -50,16 +50,19 @@ export default function CollaborationBar({
       </div>
 
       {isOwner && suggestions.length > 0 ? (
-        <div className="ml-2 flex items-center gap-2">
+        <div className="flex w-full items-center gap-2 sm:ml-2 sm:w-auto">
           <span className="text-[10px] uppercase tracking-wider text-amber-400">
             Suggestions
           </span>
-          <div className="max-w-[360px] overflow-hidden text-ellipsis whitespace-nowrap text-xs text-gray-300">
+          <div className="hidden max-w-[360px] overflow-hidden text-ellipsis whitespace-nowrap text-xs text-gray-300 sm:block">
             {suggestions[0].username}: {suggestions[0].message}
+          </div>
+          <div className="text-xs text-gray-400 sm:hidden">
+            {suggestions.length} pending
           </div>
           <Button
             size="sm"
-            className="h-6 bg-amber-500/20 text-[10px] text-amber-200 hover:bg-amber-500/30"
+            className="ml-auto h-6 bg-amber-500/20 text-[10px] text-amber-200 hover:bg-amber-500/30 sm:ml-0"
             onClick={() => onApproveSuggestion(suggestions[0].id)}
           >
             Approve

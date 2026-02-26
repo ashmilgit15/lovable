@@ -110,6 +110,7 @@ export default function Builder() {
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const [workspaceView, setWorkspaceView] = useState<"preview" | "code">("preview");
+  const [mobileSection, setMobileSection] = useState<"chat" | "workspace">("chat");
   const store = useBuilderStore();
   const queryClient = useQueryClient();
   const projectErrorHandledRef = useRef<string | null>(null);
@@ -686,7 +687,7 @@ export default function Builder() {
         reconnecting={reconnecting}
       />
 
-      <div className="relative z-10 px-3 py-2">
+      <div className="relative z-10 px-2 py-2 sm:px-3">
         <CollaborationBar
           users={collab.users}
           connected={collab.connected}
@@ -697,10 +698,142 @@ export default function Builder() {
       </div>
 
       {autoFixBanner ? (
-        <div className="relative z-10 px-3 pb-2">{autoFixBanner}</div>
+        <div className="relative z-10 px-2 pb-2 sm:px-3">{autoFixBanner}</div>
       ) : null}
 
-      <PanelGroup orientation="horizontal" className="relative z-10 flex-1 min-h-0 px-3 pb-3">
+      <div className="relative z-10 flex min-h-0 flex-1 flex-col px-2 pb-2 md:hidden">
+        <div className="mb-2 inline-flex items-center gap-1 rounded-lg border border-white/10 bg-slate-900/70 p-1">
+          <Button
+            size="sm"
+            variant="ghost"
+            className={`h-7 px-3 text-xs ${mobileSection === "chat"
+              ? "bg-cyan-500/15 text-cyan-200"
+              : "text-slate-400 hover:bg-slate-800/70 hover:text-slate-200"
+              }`}
+            onClick={() => setMobileSection("chat")}
+          >
+            Chat
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            className={`h-7 px-3 text-xs ${mobileSection === "workspace"
+              ? "bg-cyan-500/15 text-cyan-200"
+              : "text-slate-400 hover:bg-slate-800/70 hover:text-slate-200"
+              }`}
+            onClick={() => setMobileSection("workspace")}
+          >
+            Workspace
+          </Button>
+        </div>
+
+        {mobileSection === "chat" ? (
+          <div className="panel-surface min-h-0 flex-1 overflow-hidden">
+            <ChatPanel
+              onSend={(message, responseMode) =>
+                sendChatMessage(message, { responseMode })
+              }
+              onStop={stopChatMessage}
+              isOwner={canGenerateDirectly}
+              users={collab.users}
+              cursors={collab.cursors}
+              onCursorChange={collab.syncCursor}
+              suggestions={collab.suggestions}
+              onApproveSuggestion={handleApproveSuggestion}
+              prefillInput={prefillInput}
+            />
+          </div>
+        ) : (
+          <div className="panel-surface flex min-h-0 flex-1 flex-col overflow-hidden">
+            <div className="panel-header flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-white/10 bg-slate-950/35 px-2 py-2">
+              <div className="inline-flex items-center gap-1 rounded-lg border border-white/10 bg-slate-900/70 p-1">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className={`h-7 px-3 text-xs ${workspaceView === "preview"
+                    ? "bg-cyan-500/15 text-cyan-200"
+                    : "text-slate-400 hover:bg-slate-800/70 hover:text-slate-200"
+                    }`}
+                  onClick={() => setWorkspaceView("preview")}
+                >
+                  Preview
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className={`h-7 px-3 text-xs ${workspaceView === "code"
+                    ? "bg-cyan-500/15 text-cyan-200"
+                    : "text-slate-400 hover:bg-slate-800/70 hover:text-slate-200"
+                    }`}
+                  onClick={() => setWorkspaceView("code")}
+                >
+                  Code
+                </Button>
+              </div>
+
+              {workspaceView === "preview" ? (
+                <div className="inline-flex items-center gap-1 rounded-lg border border-white/10 bg-slate-900/70 p-1">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className={`h-7 px-2 text-xs ${store.activeTab === "preview"
+                      ? "bg-cyan-500/15 text-cyan-200"
+                      : "text-slate-400 hover:bg-slate-800/70 hover:text-slate-200"
+                      }`}
+                    onClick={() => store.setActiveTab("preview")}
+                  >
+                    Live
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className={`h-7 px-2 text-xs ${store.activeTab === "terminal"
+                      ? "bg-cyan-500/15 text-cyan-200"
+                      : "text-slate-400 hover:bg-slate-800/70 hover:text-slate-200"
+                      }`}
+                    onClick={() => store.setActiveTab("terminal")}
+                  >
+                    Terminal
+                  </Button>
+                </div>
+              ) : (
+                <div className="text-[10px] text-slate-500">
+                  Files and editor stack below
+                </div>
+              )}
+            </div>
+
+            {workspaceView === "preview" ? (
+              <div className="min-h-0 h-full w-full flex-1">
+                {store.activeTab === "terminal" ? (
+                  projectId ? <TerminalPanel projectId={projectId} /> : null
+                ) : (
+                  <PreviewPanel
+                    onSendVisualPrompt={(prompt) =>
+                      sendChatMessage(prompt, { bypassOwnerCheck: true })
+                    }
+                  />
+                )}
+              </div>
+            ) : (
+              <div className="flex min-h-0 flex-1 flex-col">
+                <aside className="h-44 shrink-0 overflow-hidden border-b border-white/10 bg-slate-950/30">
+                  <FileTree
+                    files={store.files}
+                    activeFile={store.activeFile}
+                    onSelectFile={(filename) => store.setActiveFile(filename)}
+                  />
+                </aside>
+                <div className="min-h-0 flex-1">
+                  <CodeEditor />
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      <PanelGroup orientation="horizontal" className="relative z-10 hidden min-h-0 flex-1 px-3 pb-3 md:flex">
         <Panel defaultSize={33} minSize={24} className="flex min-w-[320px] flex-col">
           <div className="panel-surface min-h-0 flex-1 overflow-hidden">
             <ChatPanel
