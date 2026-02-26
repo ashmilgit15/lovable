@@ -141,22 +141,22 @@ export default function Dashboard() {
 
   return (
     <div className="app-shell relative flex min-h-screen flex-col text-foreground">
-      <header className="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-white/10 bg-slate-950/70 px-6 backdrop-blur-xl">
-        <div className="flex items-center gap-2">
-          <div className="rounded-lg bg-gradient-to-br from-cyan-400 to-emerald-500 p-1.5 shadow-lg shadow-cyan-900/30">
+      <header className="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-white/8 bg-slate-950/60 px-6 backdrop-blur-2xl">
+        <Link to="/" className="flex items-center gap-2">
+          <div className="rounded-xl bg-gradient-to-br from-cyan-400 to-emerald-500 p-1.5 shadow-lg shadow-cyan-500/30">
             <Bolt className="h-4 w-4 fill-current text-white" />
           </div>
-          <span className="text-lg font-semibold tracking-tight text-slate-100">
-            one
+          <span className="text-lg font-bold tracking-tight text-slate-100">
+            One<span className="gradient-text">Forge</span>
           </span>
-        </div>
+        </Link>
 
         <div className="flex items-center gap-2 sm:gap-4">
           <Link to="/settings">
             <Button
               variant="ghost"
               size="sm"
-              className="gap-1.5 text-slate-300 hover:bg-slate-800/70 hover:text-slate-100"
+              className="gap-1.5 text-slate-400 hover:bg-slate-800/70 hover:text-slate-100"
             >
               <Settings className="h-4 w-4" />
               <span className="hidden sm:inline">Settings</span>
@@ -171,8 +171,8 @@ export default function Dashboard() {
           <section className="panel-surface rounded-2xl p-5 sm:p-6">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
               <div>
-                <h1 className="text-3xl font-semibold tracking-tight text-slate-100">Project Workspace</h1>
-                <p className="mt-1 text-sm text-slate-300">Create, iterate, and ship projects with AI-assisted workflows.</p>
+                <h1 className="text-3xl font-bold tracking-tight text-slate-100">Project <span className="gradient-text">Workspace</span></h1>
+                <p className="mt-1 text-sm text-slate-400">Create, iterate, and ship projects with AI-assisted workflows.</p>
               </div>
 
               <div className="flex w-full flex-col gap-3 sm:flex-row lg:w-auto">
@@ -188,7 +188,7 @@ export default function Dashboard() {
 
                 <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
                   <DialogTrigger asChild>
-                    <Button className="h-10 gap-2 bg-cyan-500 text-slate-950 hover:bg-cyan-400">
+                    <Button className="h-10 gap-2 bg-gradient-to-r from-cyan-500 to-emerald-500 text-white font-semibold hover:from-cyan-400 hover:to-emerald-400 shadow-md shadow-cyan-500/20">
                       <Plus className="h-4 w-4" /> New Project
                     </Button>
                   </DialogTrigger>
@@ -251,17 +251,17 @@ export default function Dashboard() {
             </div>
 
             <div className="mt-5 grid gap-3 md:grid-cols-3">
-              <div className="rounded-xl border border-white/10 bg-slate-900/60 p-4">
-                <p className="text-xs uppercase tracking-[0.12em] text-slate-400">Total Projects</p>
-                <p className="mt-1 text-2xl font-semibold text-slate-100">{projects?.length || 0}</p>
+              <div className="glass-card rounded-xl p-4 transition-transform duration-300 hover:scale-[1.02]">
+                <p className="text-xs uppercase tracking-[0.12em] text-slate-500">Total Projects</p>
+                <p className="mt-1 text-2xl font-bold gradient-text">{projects?.length || 0}</p>
               </div>
-              <div className="rounded-xl border border-white/10 bg-slate-900/60 p-4">
-                <p className="text-xs uppercase tracking-[0.12em] text-slate-400">Search Results</p>
-                <p className="mt-1 text-2xl font-semibold text-slate-100">{filteredProjects.length}</p>
+              <div className="glass-card rounded-xl p-4 transition-transform duration-300 hover:scale-[1.02]">
+                <p className="text-xs uppercase tracking-[0.12em] text-slate-500">Search Results</p>
+                <p className="mt-1 text-2xl font-bold text-slate-100">{filteredProjects.length}</p>
               </div>
-              <div className="rounded-xl border border-white/10 bg-slate-900/60 p-4">
-                <p className="text-xs uppercase tracking-[0.12em] text-slate-400">Latest Activity</p>
-                <p className="mt-1 text-sm font-medium text-cyan-200">{lastUpdated}</p>
+              <div className="glass-card rounded-xl p-4 transition-transform duration-300 hover:scale-[1.02]">
+                <p className="text-xs uppercase tracking-[0.12em] text-slate-500">Latest Activity</p>
+                <p className="mt-1 text-sm font-semibold text-cyan-300">{lastUpdated}</p>
               </div>
             </div>
           </section>
@@ -285,7 +285,7 @@ export default function Dashboard() {
                     })
                   }
                   disabled={createFromTemplateMutation.isPending}
-                  className="group rounded-xl border border-white/10 bg-slate-950/70 p-4 text-left transition-all hover:border-cyan-300/35 hover:bg-slate-900/80 disabled:cursor-not-allowed disabled:opacity-60"
+                  className="group glass-card rounded-xl p-4 text-left transition-all duration-300 hover:border-cyan-300/25 hover:scale-[1.02] disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   <div className="mb-3 flex items-center justify-between">
                     <div className="inline-flex rounded-md border border-cyan-300/30 bg-cyan-400/10 p-2 text-cyan-200">
@@ -339,7 +339,7 @@ export default function Dashboard() {
                     : "Create a new project or use a template to get started."}
                 </p>
                 {!searchQuery ? (
-                  <Button onClick={() => setDialogOpen(true)} className="gap-2 bg-cyan-500 text-slate-950 hover:bg-cyan-400">
+                  <Button onClick={() => setDialogOpen(true)} className="gap-2 bg-gradient-to-r from-cyan-500 to-emerald-500 text-white font-semibold hover:from-cyan-400 hover:to-emerald-400 shadow-md shadow-cyan-500/20">
                     <Plus className="h-4 w-4" /> Create Project
                   </Button>
                 ) : null}
@@ -349,7 +349,7 @@ export default function Dashboard() {
                 {filteredProjects.map((project) => (
                   <div
                     key={project.id}
-                    className="group relative flex flex-col justify-between rounded-xl border border-white/10 bg-slate-950/70 p-5 transition-all hover:border-cyan-300/35"
+                    className="group relative flex flex-col justify-between glass-card rounded-xl p-5 transition-all duration-300 hover:border-cyan-300/25 hover:scale-[1.01]"
                   >
                     <div className="mb-4">
                       <div className="mb-2 flex items-start justify-between">

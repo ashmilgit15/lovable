@@ -42,9 +42,11 @@ async def collab_websocket(
         return
 
     claim_user_id = get_claim_user_id(claims)
+    project_owner_id = claim_user_id
     with Session(engine) as session:
         try:
-            require_project_for_user(session, project_id, claim_user_id)
+            project = require_project_for_user(session, project_id, claim_user_id)
+            project_owner_id = str((project.owner_id or "").strip() or claim_user_id)
         except HTTPException:
             await websocket.close(code=4404)
             return
@@ -77,6 +79,7 @@ async def collab_websocket(
             user_id=resolved_user_id,
             username=username,
             websocket=websocket,
+            owner_id=project_owner_id,
         )
 
         await websocket.send_json(

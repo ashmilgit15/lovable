@@ -120,11 +120,19 @@ class CollaborationManager:
         user_id: str,
         username: str,
         websocket: WebSocket,
+        owner_id: Optional[str] = None,
     ) -> ProjectRoom:
+        resolved_owner_id = (owner_id or user_id).strip() or user_id
         room = self.rooms.get(project_id)
+        owner_changed = False
         if room is None:
-            room = ProjectRoom(project_id=project_id, owner_id=user_id)
+            room = ProjectRoom(project_id=project_id, owner_id=resolved_owner_id)
             self.rooms[project_id] = room
+        elif room.owner_id != resolved_owner_id:
+            room.owner_id = resolved_owner_id
+            owner_changed = True
+            for existing in room.users.values():
+                existing.is_owner = existing.id == room.owner_id
 
         user = CollabUser(
             id=user_id,
@@ -135,6 +143,15 @@ class CollaborationManager:
         )
 
         room.users[user_id] = user
+        if owner_changed:
+            await self.broadcast_to_room(
+                project_id,
+                {
+                    "type": "owner_changed",
+                    "owner_id": room.owner_id,
+                    "users": self.get_room_users(project_id),
+                },
+            )
 
         await self.broadcast_to_room(
             project_id,
@@ -169,7 +186,8 @@ class CollaborationManager:
                 # Transfer ownership to the first connected user if owner leaves.
                 next_owner = next(iter(room.users.values()))
                 room.owner_id = next_owner.id
-                next_owner.is_owner = True
+                for existing in room.users.values():
+                    existing.is_owner = existing.id == room.owner_id
                 await self.broadcast_to_room(
                     project_id,
                     {

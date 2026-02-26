@@ -1,6 +1,6 @@
-# Lovable Local — AI App Builder
+# OneForge — AI Application Studio
 
-A local-first AI app builder powered by Ollama. Describe your app in plain English, get React + TypeScript + TailwindCSS code generated live. Now with an integrated terminal and project management tools.
+A local-first AI application studio powered by Ollama and BYOK providers. Describe your app in plain English, get production-ready React + TypeScript + TailwindCSS code generated live with real-time preview, integrated terminal, and deployment-ready output.
 
 ## Quick Start
 
@@ -41,7 +41,7 @@ The Vite frontend is ready for Vercel deploys from `frontend/`.
 
 1. Deploy a backend separately (FastAPI + WebSockets + local process features are not suitable for Vercel serverless in this repo).
    - On the backend, set `CORS_ORIGINS` to include your Vercel frontend URL (no trailing slash), for example:
-     - `CORS_ORIGINS=https://lovable-rose.vercel.app`
+     - `CORS_ORIGINS=https://oneforge.vercel.app`
    - Optional for preview deployments:
      - `CORS_ORIGIN_REGEX=https://.*\\.vercel\\.app`
 2. In Vercel project env vars, set:
@@ -56,7 +56,7 @@ vercel deploy frontend -y
 
 ## Secure BYOK + Local Ollama
 
-The backend now supports both:
+The backend supports both:
 
 - Local open-source models through Ollama (default when no external provider is selected).
 - BYOK external providers (OpenAI-compatible) with encrypted key storage.
@@ -86,16 +86,18 @@ For hosted/authenticated deployments:
 
 ## Features
 
-- **Chat-Driven Development**: Describe your app in natural language.
-- **Live Preview**: See your changes in real-time with Sandpack.
-- **Integrated Terminal**: Run commands (`npm install`, `npm run dev`) directly from the UI.
+- **AI Pair Programmer**: Chat with your codebase in natural language with full project context awareness.
+- **Live Preview**: See every change rendered in real-time with Sandpack.
+- **Integrated Terminal**: Run npm scripts, install packages, and execute commands directly in your browser.
+- **Monaco Code Editor**: Full-featured in-browser code editing with syntax highlighting and version history.
+- **Template Gallery**: 10+ professionally crafted templates for SaaS dashboards, e-commerce, portfolios, and more.
+- **BYOK & Privacy-First**: Bring your own API keys with encrypted storage, or use local Ollama models.
 - **Model Manager**: Pull and manage Ollama models from the Settings page.
 - **Auto-Titling**: Projects are automatically named based on your first prompt.
-- **100% Local**: Powered by Ollama, no data leaves your machine.
+- **Collaboration**: Real-time collaboration with WebSocket-based syncing.
 
 ## Tech Stack
 
 - **Frontend**: React 19, TypeScript, Vite, TailwindCSS v4, shadcn/ui, Monaco Editor, Sandpack
 - **Backend**: FastAPI, SQLite, SQLModel
-- **AI**: Ollama (local LLM)
-# lovable
+- **AI**: Ollama (local LLM) + BYOK providers (OpenAI-compatible)

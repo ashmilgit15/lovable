@@ -196,6 +196,7 @@ export default function Builder() {
     },
   });
   const hasRemoteOwner =
+    Boolean(collab.userId) &&
     collab.connected &&
     collab.users.some((user) => user.is_owner && user.id !== collab.userId);
   const suggestionMode = hasRemoteOwner && !collab.isOwner;

@@ -116,11 +116,11 @@ export default function BuilderHeader({
         </Link>
 
         <div className="flex items-center gap-1.5 select-none">
-          <div className="rounded-md bg-gradient-to-br from-cyan-400 to-emerald-500 p-1 shadow-lg shadow-cyan-900/30">
+          <div className="rounded-md bg-gradient-to-br from-cyan-400 to-emerald-500 p-1 shadow-lg shadow-cyan-500/25">
             <Zap className="h-3 w-3 text-white fill-current" />
           </div>
           <span className="font-bold text-sm tracking-tight text-slate-100">
-            one
+            One<span className="gradient-text">Forge</span>
           </span>
         </div>
       </div>

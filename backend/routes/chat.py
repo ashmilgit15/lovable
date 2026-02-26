@@ -292,6 +292,9 @@ async def chat_websocket(websocket: WebSocket, project_id: str):
             requested_tools = normalize_tool_config(data.get("tools"))
             requested_response_mode = (data.get("response_mode") or "build").strip().lower()
             ask_mode = requested_response_mode == "ask"
+            task_planner_enabled = bool(
+                requested_tools.get("task_planner", False) and not ask_mode
+            )
 
             if not user_message:
                 continue
@@ -423,7 +426,7 @@ async def chat_websocket(websocket: WebSocket, project_id: str):
                 "task_planner": False,
             }
 
-            if requested_tools.get("task_planner", False):
+            if task_planner_enabled:
                 await safe_send(
                     websocket,
                     {
@@ -614,7 +617,7 @@ async def chat_websocket(websocket: WebSocket, project_id: str):
                     "\n\nAdditional tool context:\n"
                     + "\n\n".join(tool_contexts)
                 )
-            if requested_tools.get("task_planner", False):
+            if task_planner_enabled:
                 enhanced_system_prompt += (
                     "\n\nTask planner is enabled. Execute work using the provided checklist. "
                     "Prioritize the current in-progress task and keep changes scoped to checklist items."
@@ -643,7 +646,7 @@ async def chat_websocket(websocket: WebSocket, project_id: str):
                     "message": "Context ready",
                 },
             )
-            if requested_tools.get("task_planner", False):
+            if task_planner_enabled:
                 todo_state = progress_plan(project_id, 0.2)
                 await safe_send(websocket, {"type": "todo_state", "state": todo_state})
 
@@ -750,7 +753,7 @@ async def chat_websocket(websocket: WebSocket, project_id: str):
                             "message": f"Applying {total_files} file updates...",
                         },
                     )
-                    if requested_tools.get("task_planner", False):
+                    if task_planner_enabled:
                         todo_state = progress_plan(project_id, 0.55)
                         await safe_send(websocket, {"type": "todo_state", "state": todo_state})
 
@@ -899,7 +902,7 @@ async def chat_websocket(websocket: WebSocket, project_id: str):
                         },
                     )
 
-                if requested_tools.get("task_planner", False):
+                if task_planner_enabled and parsed_files:
                     todo_state = mark_project_complete(project_id)
                     await safe_send(websocket, {"type": "todo_state", "state": todo_state})
 
@@ -938,7 +941,7 @@ async def chat_websocket(websocket: WebSocket, project_id: str):
                     },
                 )
 
-                if is_untrusted_code_execution_enabled():
+                if parsed_files and is_untrusted_code_execution_enabled():
                     asyncio.create_task(
                         run_project_autofix(
                             project_id,
@@ -953,7 +956,7 @@ async def chat_websocket(websocket: WebSocket, project_id: str):
                 GENERATION_ACTIVE[project_id] = False
                 GENERATION_CANCEL_FLAGS[project_id] = False
                 error_detail = format_exception_detail(e)
-                if requested_tools.get("task_planner", False):
+                if task_planner_enabled:
                     with suppress(Exception):
                         todo_state = progress_plan(project_id, 0.15)
                         await safe_send(websocket, {"type": "todo_state", "state": todo_state})
@@ -974,7 +977,7 @@ async def chat_websocket(websocket: WebSocket, project_id: str):
                 error_detail = format_exception_detail(e)
                 print(f"DEBUG: Chat generation error in {project_id}: {error_detail}")
                 traceback.print_exc()
-                if requested_tools.get("task_planner", False):
+                if task_planner_enabled:
                     with suppress(Exception):
                         todo_state = progress_plan(project_id, 0.15)
                         await safe_send(websocket, {"type": "todo_state", "state": todo_state})
