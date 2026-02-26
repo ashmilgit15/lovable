@@ -251,13 +251,41 @@ function extractAssetRefs(indexHtml: string): { js: string[]; css: string[] } {
   return { js, css };
 }
 
+function extractScriptRefs(indexHtml: string): string[] {
+  const scripts: string[] = [];
+  indexHtml.replace(
+    /<script[^>]+src=["']([^"']+)["'][^>]*>\s*<\/script>/gi,
+    (_match, src: string) => {
+      scripts.push(src);
+      return _match;
+    }
+  );
+  return scripts;
+}
+
 function hasCompleteBuiltAssetBundle(
   indexHtml: string,
   availableFiles: Record<string, string>,
   htmlPath: string
 ): boolean {
+  const scriptRefs = extractScriptRefs(indexHtml);
+  const hasSourceEntrypointScript = scriptRefs.some((src) => {
+    const resolved = resolveSandpackAssetPath(src, htmlPath);
+    const target = (resolved || src || "").toLowerCase();
+    return (
+      target.startsWith("/src/") ||
+      /\/src\//.test(target) ||
+      /\.(?:ts|tsx|jsx)(?:$|\?)/.test(target)
+    );
+  });
+  if (hasSourceEntrypointScript) return false;
+
   const refs = extractAssetRefs(indexHtml);
   if (refs.js.length === 0) return false;
+  const hasNonBridgeJs = refs.js.some(
+    (src) => !/forge-bridge\.js(?:$|\?)/i.test(src)
+  );
+  if (!hasNonBridgeJs) return false;
 
   const hasLocalOrExternalAsset = (reference: string) => {
     const resolved = resolveSandpackAssetPath(reference, htmlPath);
