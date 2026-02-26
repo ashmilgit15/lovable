@@ -95,25 +95,34 @@ function parseSandpackDeps(
 
 function normalizeBuiltIndexHtmlForSandbox(
   indexHtml: string,
-  entry: string | undefined
+  entry: string | undefined,
+  availableFiles: Record<string, string>
 ): string {
   if (!entry) return indexHtml;
 
   const hasBuiltAssetRefs = /\/assets\/[^"']+\.(?:css|js)/i.test(indexHtml);
   if (!hasBuiltAssetRefs) return indexHtml;
 
+  const hasFile = (path: string) => {
+    const normalizedPath = normalizeSandpackPath(path);
+    return Object.prototype.hasOwnProperty.call(availableFiles, normalizedPath);
+  };
+
   let normalized = indexHtml;
   normalized = normalized.replace(
-    /<link[^>]+href=["']\/assets\/[^"']+\.css["'][^>]*>\s*/gi,
-    ""
+    /<link[^>]+href=["'](\/assets\/[^"']+\.css)["'][^>]*>\s*/gi,
+    (fullMatch, cssPath: string) => (hasFile(cssPath) ? fullMatch : "")
   );
 
   const scriptPattern =
-    /<script[^>]+src=["']\/assets\/[^"']+\.js["'][^>]*>\s*<\/script>/i;
+    /<script[^>]+src=["'](\/assets\/[^"']+\.js)["'][^>]*>\s*<\/script>/i;
   if (scriptPattern.test(normalized)) {
     normalized = normalized.replace(
       scriptPattern,
-      `<script type="module" src="${entry}"></script>`
+      (fullMatch, scriptPath: string) =>
+        hasFile(scriptPath)
+          ? fullMatch
+          : `<script type="module" src="${entry}"></script>`
     );
   } else if (/<\/body>/i.test(normalized)) {
     normalized = normalized.replace(
@@ -152,7 +161,8 @@ function buildSandpackProject(files: Record<string, FileData>) {
   if (sandpackFiles["/index.html"]) {
     sandpackFiles["/index.html"] = normalizeBuiltIndexHtmlForSandbox(
       sandpackFiles["/index.html"],
-      entry
+      entry,
+      sandpackFiles
     );
   }
 
@@ -344,7 +354,7 @@ export default function PreviewPanel({ onSendVisualPrompt }: PreviewPanelProps) 
   };
 
   return (
-    <div className="relative flex h-full flex-col overflow-hidden bg-transparent">
+    <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-transparent">
       <div className="panel-header flex h-[40px] shrink-0 items-center justify-between border-b border-white/10 bg-slate-950/35 px-4 py-2">
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2">
@@ -510,7 +520,7 @@ export default function PreviewPanel({ onSendVisualPrompt }: PreviewPanelProps) 
       <div className="relative flex min-h-0 flex-1 flex-col">
         {useBrowserPreview ? (
           sandpackProject.fileCount > 0 ? (
-            <div className="h-full w-full overflow-hidden bg-[#0a0a0a]">
+            <div className="flex min-h-0 flex-1 overflow-hidden bg-[#0a0a0a]">
               <SandpackProvider
                 key={`${activeProjectId ?? "project"}:${sandboxRefreshKey}`}
                 template={sandpackProject.template}
@@ -530,7 +540,7 @@ export default function PreviewPanel({ onSendVisualPrompt }: PreviewPanelProps) 
                   showRefreshButton
                   showRestartButton
                   style={{ height: "100%" }}
-                  className="h-full [&_.sp-wrapper]:h-full [&_.sp-layout]:h-full [&_.sp-stack]:h-full [&_.sp-preview]:h-full [&_.sp-preview-container]:h-full"
+                  className="flex min-h-0 flex-1 [&_.sp-stack]:min-h-0 [&_.sp-stack]:h-full [&_.sp-preview]:min-h-0 [&_.sp-preview]:h-full [&_.sp-preview-container]:min-h-0 [&_.sp-preview-container]:h-full [&_.sp-preview-container]:flex-1 [&_.sp-preview-iframe]:min-h-0 [&_.sp-preview-iframe]:h-full"
                 />
               </SandpackProvider>
             </div>
