@@ -75,6 +75,38 @@ function parseSandpackDeps(rawPackageJson: string | undefined): {
   }
 }
 
+function normalizeBuiltIndexHtmlForSandbox(
+  indexHtml: string,
+  entry: string | undefined
+): string {
+  if (!entry) return indexHtml;
+
+  const hasBuiltAssetRefs = /\/assets\/[^"']+\.(?:css|js)/i.test(indexHtml);
+  if (!hasBuiltAssetRefs) return indexHtml;
+
+  let normalized = indexHtml;
+  normalized = normalized.replace(
+    /<link[^>]+href=["']\/assets\/[^"']+\.css["'][^>]*>\s*/gi,
+    ""
+  );
+
+  const scriptPattern =
+    /<script[^>]+src=["']\/assets\/[^"']+\.js["'][^>]*>\s*<\/script>/i;
+  if (scriptPattern.test(normalized)) {
+    normalized = normalized.replace(
+      scriptPattern,
+      `<script type="module" src="${entry}"></script>`
+    );
+  } else if (/<\/body>/i.test(normalized)) {
+    normalized = normalized.replace(
+      /<\/body>/i,
+      `  <script type="module" src="${entry}"></script>\n</body>`
+    );
+  }
+
+  return normalized;
+}
+
 function buildSandpackProject(files: Record<string, FileData>) {
   const sandpackFiles: Record<string, string> = {};
 
@@ -98,6 +130,13 @@ function buildSandpackProject(files: Record<string, FileData>) {
   ];
   const entry = entryCandidates.find((candidate) => sandpackFiles[candidate]);
   const activeFile = entry || Object.keys(sandpackFiles)[0] || "/src/main.tsx";
+
+  if (sandpackFiles["/index.html"]) {
+    sandpackFiles["/index.html"] = normalizeBuiltIndexHtmlForSandbox(
+      sandpackFiles["/index.html"],
+      entry
+    );
+  }
 
   const hasTypescript = Object.keys(sandpackFiles).some(
     (path) => path.endsWith(".ts") || path.endsWith(".tsx")
