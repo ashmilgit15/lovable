@@ -554,12 +554,15 @@ function normalizeNativeTailwindConfigForSandpack(
   sandpackFiles: Record<string, string>
 ) {
   const postcssPath = findExistingConfigPath(sandpackFiles, [
+    "/postcss.config.cjs",
     "/postcss.config.js",
     "/postcss.config.mjs",
   ]);
   if (postcssPath && typeof sandpackFiles[postcssPath] === "string") {
     const postcssContent = sandpackFiles[postcssPath];
+    const canUseCjsSyntax = postcssPath.endsWith(".cjs") || postcssPath.endsWith(".js");
     if (
+      canUseCjsSyntax &&
       /export\s+default/.test(postcssContent) &&
       !/module\.exports\s*=/.test(postcssContent)
     ) {
@@ -571,12 +574,15 @@ function normalizeNativeTailwindConfigForSandpack(
   }
 
   const tailwindPath = findExistingConfigPath(sandpackFiles, [
+    "/tailwind.config.cjs",
     "/tailwind.config.js",
     "/tailwind.config.mjs",
   ]);
   if (tailwindPath && typeof sandpackFiles[tailwindPath] === "string") {
     let tailwindContent = sandpackFiles[tailwindPath];
+    const canUseCjsSyntax = tailwindPath.endsWith(".cjs") || tailwindPath.endsWith(".js");
     if (
+      canUseCjsSyntax &&
       /export\s+default/.test(tailwindContent) &&
       !/module\.exports\s*=/.test(tailwindContent)
     ) {
@@ -1080,7 +1086,9 @@ function buildSandpackProject(files: Record<string, FileData>) {
   );
 
   const activeFile = entry || Object.keys(sandpackFiles)[0] || effectiveEntry;
-  const environment = "node";
+  const environment = hasTypescript
+    ? "create-react-app-typescript"
+    : "create-react-app";
 
   return {
     files: sandpackFiles,
