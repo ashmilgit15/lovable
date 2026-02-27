@@ -380,6 +380,134 @@ function collectUsedPackages(sandpackFiles: Record<string, string>): Set<string>
   return used;
 }
 
+function extractColorVariableNames(cssContent: string): string[] {
+  const colorVariables = new Set<string>();
+  const variablePattern = /--([a-z0-9-]+)\s*:\s*([^;]+);/gi;
+  let match: RegExpExecArray | null;
+
+  while ((match = variablePattern.exec(cssContent)) !== null) {
+    const name = (match[1] || "").trim();
+    const value = (match[2] || "").trim().toLowerCase();
+    if (!name || !value) continue;
+    if (name.includes("radius")) continue;
+    if (name.includes("font")) continue;
+
+    const looksLikeColor =
+      value.includes("%") ||
+      value.includes("hsl(") ||
+      value.includes("oklch(") ||
+      value.includes("rgb(") ||
+      value.includes("#");
+
+    if (looksLikeColor) {
+      colorVariables.add(name);
+    }
+  }
+
+  return Array.from(colorVariables);
+}
+
+function buildColorUtilityFallbackCss(variableNames: string[]): string {
+  if (variableNames.length === 0) return "";
+
+  const lines: string[] = [];
+  for (const variableName of variableNames) {
+    lines.push(
+      `.bg-${variableName}{background-color:hsl(var(--${variableName})) !important;}`,
+      `.text-${variableName}{color:hsl(var(--${variableName})) !important;}`,
+      `.border-${variableName}{border-color:hsl(var(--${variableName})) !important;}`,
+      `.ring-${variableName}{--tw-ring-color:hsl(var(--${variableName})) !important;}`,
+      `.fill-${variableName}{fill:hsl(var(--${variableName})) !important;}`,
+      `.stroke-${variableName}{stroke:hsl(var(--${variableName})) !important;}`
+    );
+  }
+
+  if (variableNames.includes("background") || variableNames.includes("foreground")) {
+    const bodyFallback: string[] = [];
+    if (variableNames.includes("background")) {
+      bodyFallback.push("background-color:hsl(var(--background)) !important;");
+    }
+    if (variableNames.includes("foreground")) {
+      bodyFallback.push("color:hsl(var(--foreground)) !important;");
+    }
+    if (bodyFallback.length > 0) {
+      lines.push(`body{${bodyFallback.join("")}}`);
+    }
+  }
+
+  if (variableNames.includes("border")) {
+    lines.push(`*{border-color:hsl(var(--border));}`);
+  }
+
+  return lines.join("\n");
+}
+
+function toRelativeImportPath(fromFile: string, toFile: string): string {
+  const fromSegments = normalizeSandpackPath(fromFile).split("/").filter(Boolean);
+  const toSegments = normalizeSandpackPath(toFile).split("/").filter(Boolean);
+  const fromDir = fromSegments.slice(0, -1);
+  let shared = 0;
+
+  while (
+    shared < fromDir.length &&
+    shared < toSegments.length &&
+    fromDir[shared] === toSegments[shared]
+  ) {
+    shared += 1;
+  }
+
+  const upLevels = fromDir.length - shared;
+  const downSegments = toSegments.slice(shared);
+  const relative = [
+    ...Array(upLevels).fill(".."),
+    ...downSegments,
+  ];
+
+  return relative.length > 0 ? `./${relative.join("/")}`.replace(/^\.\/\.\.\//, "../") : "./";
+}
+
+function injectTwindRuntimeBootstrap(
+  sandpackFiles: Record<string, string>,
+  entry: string,
+  colorVariableNames: string[]
+) {
+  const entryContent = sandpackFiles[entry];
+  if (typeof entryContent !== "string" || !entryContent.trim()) return;
+
+  const runtimePath = entry.endsWith(".ts") || entry.endsWith(".tsx")
+    ? "/__sandbox_twind_runtime.ts"
+    : "/__sandbox_twind_runtime.js";
+
+  const colorEntries = colorVariableNames
+    .map((name) => `        "${name}": "hsl(var(--${name}))"`)
+    .join(",\n");
+
+  const runtimeConfig = colorEntries
+    ? `{
+  theme: {
+    extend: {
+      colors: {
+${colorEntries}
+      },
+    },
+  },
+}`
+    : "{}";
+
+  sandpackFiles[runtimePath] = `import { setup } from "twind";
+import { observe } from "twind/observe";
+
+setup(${runtimeConfig});
+observe(document.documentElement);
+`;
+
+  if (entryContent.includes("__sandbox_twind_runtime")) return;
+
+  const importPath = toRelativeImportPath(entry, runtimePath);
+  sandpackFiles[entry] = `import "${importPath}";
+${entryContent}`;
+}
+
 function buildRuntimeCssSupport(
   sandpackFiles: Record<string, string>
 ): {
@@ -389,6 +517,7 @@ function buildRuntimeCssSupport(
   sourceCssPath: string | null;
   usesTailwindBuildDirectives: boolean;
   tailwindRuntime: "v3" | "v4" | null;
+  colorVariableNames: string[];
 } {
   const cssPath = pickFallbackCssFile(sandpackFiles);
   if (!cssPath) {
@@ -399,6 +528,7 @@ function buildRuntimeCssSupport(
       sourceCssPath: null,
       usesTailwindBuildDirectives: false,
       tailwindRuntime: null,
+      colorVariableNames: [],
     };
   }
   const cssContent = sandpackFiles[cssPath] || "";
@@ -422,6 +552,7 @@ function buildRuntimeCssSupport(
       sourceCssPath: cssPath,
       usesTailwindBuildDirectives: false,
       tailwindRuntime: null,
+      colorVariableNames: [],
     };
   }
 
@@ -435,9 +566,14 @@ function buildRuntimeCssSupport(
   if (!/@tailwind\s+(?:base|components|utilities)\s*;/i.test(browserTailwindCss)) {
     browserTailwindCss = `@tailwind base;\n@tailwind components;\n@tailwind utilities;\n${browserTailwindCss}`;
   }
+  // Browser runtime does not have full project Tailwind config context.
+  // Unknown custom token utilities inside @apply can abort all Tailwind output.
+  browserTailwindCss = browserTailwindCss.replace(/@apply\s+[^;]+;\s*/gi, "");
 
   // Plain CSS fallback keeps non-tailwind declarations (keyframes, custom rules)
   // while stripping directives that require a build step.
+  const colorVariableNames = extractColorVariableNames(cssContent);
+  const colorUtilityFallbackCss = buildColorUtilityFallbackCss(colorVariableNames);
   const plainCssFallback = cssContent
     .replace(/@import\s+["']tailwindcss["'];?\s*/gi, "")
     .replace(/@tailwind\s+(?:base|components|utilities)\s*;\s*/gi, "")
@@ -446,14 +582,15 @@ function buildRuntimeCssSupport(
     .replace(/@apply\s+[^;]+;/gi, "");
 
   const generatedPath = "/__sandbox_preview.css";
-  sandpackFiles[generatedPath] = plainCssFallback;
+  sandpackFiles[generatedPath] = `${plainCssFallback}\n\n${colorUtilityFallbackCss}`.trim();
   return {
     cssPath: generatedPath,
-    includeTailwindCdn: true,
-    inlineTailwindCss: browserTailwindCss,
+    includeTailwindCdn: false,
+    inlineTailwindCss: null,
     sourceCssPath: cssPath,
     usesTailwindBuildDirectives: true,
     tailwindRuntime: usesTailwindV4Directives ? "v4" : "v3",
+    colorVariableNames,
   };
 }
 
@@ -535,18 +672,18 @@ function normalizeIndexHtmlForRuntime(
 
   if (
     includeTailwindCdn &&
-    !/cdn\.tailwindcss\.com|@tailwindcss\/browser@4/i.test(normalized)
+    !/tailwind\.min\.css|data-inline-tailwind-loader/i.test(normalized)
   ) {
-    const tailwindBrowserScript = tailwindRuntime === "v4"
-      ? "https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"
-      : "https://cdn.tailwindcss.com";
+    // Sandpack can strip external scripts from project HTML. Prefer a static stylesheet fallback.
+    const tailwindStylesheet =
+      '<link rel="stylesheet" data-inline-tailwind-loader="true" href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" />';
     if (/<\/head>/i.test(normalized)) {
       normalized = normalized.replace(
         /<\/head>/i,
-        `  <script src="${tailwindBrowserScript}"></script>\n</head>`
+        `  ${tailwindStylesheet}\n</head>`
       );
     } else {
-      normalized = `<head>\n  <script src="${tailwindBrowserScript}"></script>\n</head>\n${normalized}`;
+      normalized = `<head>\n  ${tailwindStylesheet}\n</head>\n${normalized}`;
     }
   }
 
@@ -716,11 +853,6 @@ function buildSandpackProject(files: Record<string, FileData>) {
     if (!file?.filename) continue;
     const path = normalizeSandpackPath(file.filename);
 
-    // Ignore build tooling config files in Sandpack to force legacy client bundler instead of heavy WebContainers Node
-    // This fixes "Failed to get shell by ID" crashes inside the preview
-    if (/^\/(?:vite|eslint)\.config\.(?:js|ts|mjs|cjs)$/.test(path)) continue;
-    if (path === "/tsconfig.json" || path === "/tsconfig.node.json" || path === "/tsconfig.app.json") continue;
-
     const content = file.content ?? "";
     sandpackFiles[path] = content;
 
@@ -784,13 +916,20 @@ function buildSandpackProject(files: Record<string, FileData>) {
     cssSupport.sourceCssPath,
     cssSupport.cssPath
   );
+  if (cssSupport.usesTailwindBuildDirectives) {
+    injectTwindRuntimeBootstrap(
+      sandpackFiles,
+      effectiveEntry,
+      cssSupport.colorVariableNames
+    );
+  }
   const dependencies = ensureRuntimePackageJson(
     sandpackFiles,
     effectiveEntry,
     hasTypescript,
     collectUsedPackages(sandpackFiles),
     cssSupport.usesTailwindBuildDirectives
-      ? ["tailwindcss", "postcss", "autoprefixer", "tailwindcss-animate"]
+      ? ["twind"]
       : []
   );
   sandpackFiles["/index.html"] = normalizeIndexHtmlForRuntime(
@@ -816,7 +955,7 @@ function buildSandpackProject(files: Record<string, FileData>) {
     environment,
     activeFile,
     fileCount: Object.keys(sandpackFiles).length,
-    template: hasTypescript ? "react-ts" : "react",
+    template: hasTypescript ? "vite-react-ts" : "vite-react",
   } as const;
 }
 
