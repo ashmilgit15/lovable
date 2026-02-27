@@ -410,6 +410,245 @@ function hardenCommonListMaps(content: string): string {
   return next;
 }
 
+function parseRelativeUiNamedImports(clause: string): Set<string> {
+  const names = new Set<string>();
+  const namedMatch = clause.match(/\{([\s\S]*?)\}/);
+  if (!namedMatch) return names;
+
+  const rawEntries = namedMatch[1].split(",");
+  for (const rawEntry of rawEntries) {
+    const candidate = rawEntry.trim();
+    if (!candidate) continue;
+    const originalName = candidate.split(/\s+as\s+/i)[0]?.trim();
+    if (!originalName) continue;
+    if (!/^[A-Za-z_$][\w$]*$/.test(originalName)) continue;
+    names.add(originalName);
+  }
+
+  return names;
+}
+
+function fallbackTagForUiExport(name: string): string {
+  const normalized = name.toLowerCase();
+  if (
+    normalized.includes("button") ||
+    normalized.endsWith("trigger") ||
+    normalized === "submit"
+  ) {
+    return "button";
+  }
+  if (
+    normalized.includes("input") ||
+    normalized.includes("checkbox") ||
+    normalized.includes("radio") ||
+    normalized.includes("switch")
+  ) {
+    return "input";
+  }
+  if (normalized.includes("textarea")) return "textarea";
+  if (normalized.includes("label")) return "label";
+  if (normalized.includes("form")) return "form";
+  if (normalized.includes("link")) return "a";
+  if (normalized.includes("image") || normalized.includes("img")) return "img";
+  if (normalized.includes("separator") || normalized.includes("divider")) return "hr";
+  if (normalized.includes("table")) return "table";
+  if (normalized.includes("thead")) return "thead";
+  if (normalized.includes("tbody")) return "tbody";
+  if (normalized.includes("tr")) return "tr";
+  if (normalized.includes("th")) return "th";
+  if (normalized.includes("td")) return "td";
+  if (normalized.includes("list")) return "ul";
+  if (normalized.includes("item")) return "li";
+  return "div";
+}
+
+function hasResolvableModule(
+  sandpackFiles: Record<string, string>,
+  moduleBasePath: string
+): boolean {
+  const extensions = [".tsx", ".ts", ".jsx", ".js", ".mjs", ".cjs"];
+  const candidates: string[] = [moduleBasePath];
+
+  for (const ext of extensions) {
+    candidates.push(`${moduleBasePath}${ext}`);
+  }
+
+  if (!moduleBasePath.endsWith("/index")) {
+    for (const ext of extensions) {
+      candidates.push(`${moduleBasePath}/index${ext}`);
+    }
+  }
+
+  return candidates.some((candidate) => Boolean(findExistingSandpackPath(sandpackFiles, candidate)));
+}
+
+function pickRelativeUiCompatPath(
+  sandpackFiles: Record<string, string>,
+  moduleBasePath: string,
+  hasTypescript: boolean
+): string {
+  const extension = hasTypescript ? "tsx" : "jsx";
+  if (moduleBasePath.endsWith("/index")) {
+    return `${moduleBasePath}.${extension}`;
+  }
+
+  const folderPrefix = `${moduleBasePath}/`;
+  const hasNestedUiFiles = Object.keys(sandpackFiles).some((path) =>
+    path.startsWith(folderPrefix)
+  );
+  if (hasNestedUiFiles) {
+    return `${moduleBasePath}/index.${extension}`;
+  }
+
+  return `${moduleBasePath}.${extension}`;
+}
+
+function buildRelativeUiCompatModuleContent(
+  exportNames: string[],
+  hasTypescript: boolean
+): string {
+  const uniqueExportNames = Array.from(
+    new Set(exportNames.filter((name) => /^[A-Za-z_$][\w$]*$/.test(name)))
+  ).sort();
+
+  const needsCn = uniqueExportNames.includes("cn");
+  const componentNames = uniqueExportNames.filter(
+    (name) => name !== "cn" && !name.startsWith("use")
+  );
+  const hookNames = uniqueExportNames.filter(
+    (name) => name !== "cn" && name.startsWith("use")
+  );
+
+  const componentDeclarations = componentNames
+    .map((name) => {
+      const tag = fallbackTagForUiExport(name);
+      return `const ${name} = createFallback("${tag}");
+${name}.displayName = "${name}";`;
+    })
+    .join("\n\n");
+
+  const hookDeclarations = hookNames
+    .map((name) => `const ${name} = () => ({});`)
+    .join("\n");
+
+  const namedExports = new Set<string>();
+  if (needsCn) namedExports.add("cn");
+  for (const name of componentNames) namedExports.add(name);
+  for (const name of hookNames) namedExports.add(name);
+  if (namedExports.size === 0) {
+    namedExports.add("cn");
+  }
+
+  const orderedNamedExports = Array.from(namedExports).sort();
+  const defaultObjectEntries = Array.from(namedExports).sort();
+
+  if (hasTypescript) {
+    return `import * as React from "react";
+
+type FallbackProps = {
+  className?: string;
+  children?: React.ReactNode;
+  [key: string]: unknown;
+};
+
+const cn = (...values: Array<string | null | undefined | false>) =>
+  values.filter(Boolean).join(" ");
+
+const createFallback = (tag = "div") =>
+  React.forwardRef<HTMLElement, FallbackProps>(function UiFallback(
+    { className, children, ...props },
+    ref
+  ) {
+    return React.createElement(
+      tag,
+      { ...props, ref, className: cn(className) },
+      children
+    );
+  });
+
+${componentDeclarations || ""}
+${hookDeclarations || ""}
+
+export { ${orderedNamedExports.join(", ")} };
+
+const ui = { ${defaultObjectEntries.join(", ")} };
+export default ui;
+`;
+  }
+
+  return `import * as React from "react";
+
+const cn = (...values) => values.filter(Boolean).join(" ");
+
+const createFallback = (tag = "div") =>
+  React.forwardRef(function UiFallback(
+    { className, children, ...props },
+    ref
+  ) {
+    return React.createElement(
+      tag,
+      { ...props, ref, className: cn(className) },
+      children
+    );
+  });
+
+${componentDeclarations || ""}
+${hookDeclarations || ""}
+
+export { ${orderedNamedExports.join(", ")} };
+
+const ui = { ${defaultObjectEntries.join(", ")} };
+export default ui;
+`;
+}
+
+function ensureRelativeUiCompatModules(
+  sandpackFiles: Record<string, string>,
+  hasTypescript: boolean
+) {
+  const sourceFilePattern = /\.(?:[cm]?[jt]sx?)$/i;
+  const uiImportPattern =
+    /\bimport\s+([^;]+?)\s+from\s+["'](\.{1,2}\/ui(?:\/index)?)["'];?/g;
+  const pendingCompatModules = new Map<string, Set<string>>();
+
+  for (const [path, content] of Object.entries(sandpackFiles)) {
+    if (!sourceFilePattern.test(path)) continue;
+    if (typeof content !== "string") continue;
+
+    let match: RegExpExecArray | null;
+    while ((match = uiImportPattern.exec(content)) !== null) {
+      const clause = (match[1] || "").trim();
+      const specifier = (match[2] || "").trim();
+      if (!clause || !specifier) continue;
+
+      const moduleBasePath = normalizeSandpackPath(`${dirname(path)}/${specifier}`);
+      if (hasResolvableModule(sandpackFiles, moduleBasePath)) {
+        continue;
+      }
+
+      const compatPath = pickRelativeUiCompatPath(
+        sandpackFiles,
+        moduleBasePath,
+        hasTypescript
+      );
+      const requestedNames = parseRelativeUiNamedImports(clause);
+      const existing = pendingCompatModules.get(compatPath) || new Set<string>();
+      for (const name of requestedNames) {
+        existing.add(name);
+      }
+      pendingCompatModules.set(compatPath, existing);
+    }
+  }
+
+  for (const [compatPath, exportNameSet] of pendingCompatModules.entries()) {
+    if (sandpackFiles[compatPath]) continue;
+    sandpackFiles[compatPath] = buildRelativeUiCompatModuleContent(
+      Array.from(exportNameSet),
+      hasTypescript
+    );
+  }
+}
+
 function extractColorVariableNames(cssContent: string): string[] {
   const colorVariables = new Set<string>();
   const variablePattern = /--([a-z0-9-]+)\s*:\s*([^;]+);/gi;
@@ -1015,6 +1254,7 @@ function buildSandpackProject(files: Record<string, FileData>) {
   const hasTypescript = Object.keys(sandpackFiles).some(
     (path) => path.endsWith(".ts") || path.endsWith(".tsx")
   );
+  ensureRelativeUiCompatModules(sandpackFiles, hasTypescript);
   const defaultEntry = hasTypescript ? "/src/main.tsx" : "/src/main.jsx";
   const effectiveEntry = entry || defaultEntry;
 
