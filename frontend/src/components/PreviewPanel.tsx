@@ -388,6 +388,28 @@ function collectUsedPackages(sandpackFiles: Record<string, string>): Set<string>
   return used;
 }
 
+function hardenCommonListMaps(content: string): string {
+  const listIdentifiers = [
+    "logos",
+    "plans",
+    "pricingPlans",
+    "features",
+    "testimonials",
+    "services",
+  ];
+
+  let next = content;
+  for (const identifier of listIdentifiers) {
+    const mapPattern = new RegExp(`\\b${identifier}\\.map\\(`, "g");
+    next = next.replace(
+      mapPattern,
+      `(Array.isArray(${identifier}) ? ${identifier} : []).map(`
+    );
+  }
+
+  return next;
+}
+
 function extractColorVariableNames(cssContent: string): string[] {
   const colorVariables = new Set<string>();
   const variablePattern = /--([a-z0-9-]+)\s*:\s*([^;]+);/gi;
@@ -861,7 +883,10 @@ function buildSandpackProject(files: Record<string, FileData>) {
     if (!file?.filename) continue;
     const path = normalizeSandpackPath(file.filename);
 
-    const content = file.content ?? "";
+    const sourceContent = file.content ?? "";
+    const content = /\.(?:[jt]sx)$/i.test(path)
+      ? hardenCommonListMaps(sourceContent)
+      : sourceContent;
     sandpackFiles[path] = content;
 
     // Mirror /public assets to root to match typical references like /forge-bridge.js
