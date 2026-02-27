@@ -538,6 +538,70 @@ observe(document.documentElement);
 ${entryContent}`;
 }
 
+function findExistingConfigPath(
+  sandpackFiles: Record<string, string>,
+  candidates: string[]
+): string | null {
+  for (const candidate of candidates) {
+    if (Object.prototype.hasOwnProperty.call(sandpackFiles, candidate)) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
+function normalizeNativeTailwindConfigForSandpack(
+  sandpackFiles: Record<string, string>
+) {
+  const postcssPath = findExistingConfigPath(sandpackFiles, [
+    "/postcss.config.js",
+    "/postcss.config.mjs",
+  ]);
+  if (postcssPath && typeof sandpackFiles[postcssPath] === "string") {
+    const postcssContent = sandpackFiles[postcssPath];
+    if (
+      /export\s+default/.test(postcssContent) &&
+      !/module\.exports\s*=/.test(postcssContent)
+    ) {
+      sandpackFiles[postcssPath] = postcssContent.replace(
+        /export\s+default/,
+        "module.exports ="
+      );
+    }
+  }
+
+  const tailwindPath = findExistingConfigPath(sandpackFiles, [
+    "/tailwind.config.js",
+    "/tailwind.config.mjs",
+  ]);
+  if (tailwindPath && typeof sandpackFiles[tailwindPath] === "string") {
+    let tailwindContent = sandpackFiles[tailwindPath];
+    if (
+      /export\s+default/.test(tailwindContent) &&
+      !/module\.exports\s*=/.test(tailwindContent)
+    ) {
+      tailwindContent = tailwindContent.replace(
+        /export\s+default/,
+        "module.exports ="
+      );
+    }
+
+    tailwindContent = tailwindContent.replace(
+      /content:\s*\[([\s\S]*?)\]/m,
+      (fullMatch, inner: string) => {
+        if (inner.includes("./index.html")) return fullMatch;
+        const trimmed = inner.trim();
+        if (!trimmed) {
+          return `content: [\n    "./index.html"\n  ]`;
+        }
+        return `content: [\n    "./index.html",\n${trimmed}\n  ]`;
+      }
+    );
+
+    sandpackFiles[tailwindPath] = tailwindContent;
+  }
+}
+
 function buildRuntimeCssSupport(
   sandpackFiles: Record<string, string>
 ): {
@@ -548,6 +612,7 @@ function buildRuntimeCssSupport(
   usesTailwindBuildDirectives: boolean;
   tailwindRuntime: "v3" | "v4" | null;
   colorVariableNames: string[];
+  nativeTailwindBuild: boolean;
 } {
   const cssPath = pickFallbackCssFile(sandpackFiles);
   if (!cssPath) {
@@ -559,6 +624,7 @@ function buildRuntimeCssSupport(
       usesTailwindBuildDirectives: false,
       tailwindRuntime: null,
       colorVariableNames: [],
+      nativeTailwindBuild: false,
     };
   }
   const cssContent = sandpackFiles[cssPath] || "";
@@ -573,6 +639,22 @@ function buildRuntimeCssSupport(
     /@import\s+["']tailwindcss["'];?/i.test(cssContent) ||
     /@theme\s*\{/i.test(cssContent) ||
     /@custom-variant\s+/i.test(cssContent);
+  const hasPostcssConfig = Boolean(
+    findExistingConfigPath(sandpackFiles, [
+      "/postcss.config.js",
+      "/postcss.config.cjs",
+      "/postcss.config.mjs",
+    ])
+  );
+  const hasTailwindConfig = Boolean(
+    findExistingConfigPath(sandpackFiles, [
+      "/tailwind.config.js",
+      "/tailwind.config.cjs",
+      "/tailwind.config.mjs",
+      "/tailwind.config.ts",
+    ])
+  );
+  const nativeTailwindBuild = usesTailwindBuildDirectives && hasPostcssConfig && hasTailwindConfig;
 
   if (!usesTailwindBuildDirectives) {
     return {
@@ -583,6 +665,20 @@ function buildRuntimeCssSupport(
       usesTailwindBuildDirectives: false,
       tailwindRuntime: null,
       colorVariableNames: [],
+      nativeTailwindBuild: false,
+    };
+  }
+
+  if (nativeTailwindBuild) {
+    return {
+      cssPath,
+      includeTailwindCdn: false,
+      inlineTailwindCss: null,
+      sourceCssPath: cssPath,
+      usesTailwindBuildDirectives: true,
+      tailwindRuntime: usesTailwindV4Directives ? "v4" : "v3",
+      colorVariableNames: [],
+      nativeTailwindBuild: true,
     };
   }
 
@@ -621,6 +717,7 @@ function buildRuntimeCssSupport(
     usesTailwindBuildDirectives: true,
     tailwindRuntime: usesTailwindV4Directives ? "v4" : "v3",
     colorVariableNames,
+    nativeTailwindBuild: false,
   };
 }
 
@@ -943,13 +1040,17 @@ function buildSandpackProject(files: Record<string, FileData>) {
   }
 
   const cssSupport = buildRuntimeCssSupport(sandpackFiles);
-  rewriteEntryCssImportForRuntime(
-    sandpackFiles,
-    effectiveEntry,
-    cssSupport.sourceCssPath,
-    cssSupport.cssPath
-  );
-  if (cssSupport.usesTailwindBuildDirectives) {
+  if (cssSupport.nativeTailwindBuild) {
+    normalizeNativeTailwindConfigForSandpack(sandpackFiles);
+  } else {
+    rewriteEntryCssImportForRuntime(
+      sandpackFiles,
+      effectiveEntry,
+      cssSupport.sourceCssPath,
+      cssSupport.cssPath
+    );
+  }
+  if (cssSupport.usesTailwindBuildDirectives && !cssSupport.nativeTailwindBuild) {
     injectTwindRuntimeBootstrap(
       sandpackFiles,
       effectiveEntry,
@@ -961,9 +1062,11 @@ function buildSandpackProject(files: Record<string, FileData>) {
     effectiveEntry,
     hasTypescript,
     collectUsedPackages(sandpackFiles),
-    cssSupport.usesTailwindBuildDirectives
-      ? ["twind"]
-      : []
+    cssSupport.nativeTailwindBuild
+      ? ["tailwindcss", "postcss", "autoprefixer", "tailwindcss-animate"]
+      : cssSupport.usesTailwindBuildDirectives
+        ? ["twind"]
+        : []
   );
   sandpackFiles["/index.html"] = normalizeIndexHtmlForRuntime(
     indexHtml,
@@ -977,9 +1080,7 @@ function buildSandpackProject(files: Record<string, FileData>) {
   );
 
   const activeFile = entry || Object.keys(sandpackFiles)[0] || effectiveEntry;
-  const environment = hasTypescript
-    ? "create-react-app-typescript"
-    : "create-react-app";
+  const environment = "node";
 
   return {
     files: sandpackFiles,
