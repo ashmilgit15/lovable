@@ -369,7 +369,15 @@ function collectUsedPackages(sandpackFiles: Record<string, string>): Set<string>
     let match: RegExpExecArray | null;
     while ((match = importPattern.exec(content)) !== null) {
       const specifier = (match[1] || match[2] || "").trim();
-      if (!specifier || specifier.startsWith(".") || specifier.startsWith("/")) continue;
+      if (
+        !specifier ||
+        specifier.startsWith(".") ||
+        specifier.startsWith("/") ||
+        specifier.startsWith("@/") ||
+        specifier.startsWith("~/")
+      ) {
+        continue;
+      }
       const packageName = specifier.startsWith("@")
         ? specifier.split("/").slice(0, 2).join("/")
         : specifier.split("/")[0];
